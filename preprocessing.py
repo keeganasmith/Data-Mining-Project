@@ -18,6 +18,7 @@ DEFAULT_LEAKAGE_TOKEN_PATTERNS = (
     r"\bwinner\b",
     r"\bwinning\b",
     r"\bloser\b",
+    r"\bresult\b",
     r"\bscore\b",
     r"\bmatchtime\b",
     r"\btime\b",
@@ -30,6 +31,10 @@ DEFAULT_LEAKAGE_TOKEN_PATTERNS = (
     r"\btotalpointswon\b",
     r"\bsetscore\b",
     r"\btiebreakscore\b",
+    # Identifier columns should not reach train-time features: they leak identity
+    # and can inflate random split metrics via memorization.
+    r"\bplayerid\b",
+    r"\bmatchid\b",
 )
 
 
