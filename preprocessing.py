@@ -168,13 +168,14 @@ def preprocess_raw_tennis(df, key_cols=None):
     return df
 
 
-def preprocess_atp_matches(df, drop_leakage=True):
+def preprocess_atp_matches(df, drop_leakage=False):
     """Preprocess ATP yearly CSV-style match data.
 
     Args:
         drop_leakage: when True, removes obvious post-match/outcome columns
-            (winner/loser, per-set stats, score and match-time fields) so models
-            trained on the result are less likely to achieve inflated accuracy.
+            (winner/loser, per-set stats, score and match-time fields).
+            Keep this False through preprocessing so labeling can still use
+            outcome columns (e.g., WinningPlayerId).
     """
     remove_unnamed_cols(df)
 
