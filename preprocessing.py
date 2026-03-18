@@ -133,14 +133,24 @@ def preprocess_atp_matches(df):
         key_cols=["tourney_id", "tourney_date", "match_num", "winner_id", "loser_id"],
     )
 
-    coerce_dates(df, date_cols=["tourney_date", "date"])
+    coerce_dates(
+        df,
+        date_cols=[
+            "StartDate",
+            "EndDate",
+            "PlayerTeam1.RankDate",
+            "PlayerTeam2.RankDate",
+            "tourney_date",
+            "date",
+        ],
+    )
 
     numeric_candidates = [
-        "winner_rank",
-        "loser_rank",
-        "winner_rank_points",
-        "loser_rank_points",
-        "best_of",
+        "PlayerTeam1.SglRollRank",
+        "PlayerTeam2.SglRollRank",
+        "PlayerTeam1.SglRaceRank",
+        "PlayerTeam2.SglRaceRank",
+        "NumberOfSets",
         "minutes",
     ]
     for col in numeric_candidates:
