@@ -120,7 +120,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     # Target is fully determined by deterministic role assignment.
     df[target_col] = (~swap).astype(int)
 
-    dedupe_subset = ["match_id", team1_id_col, team2_id_col]
+    dedupe_subset = ["event_id", "match_id", team1_id_col, team2_id_col]
     if cfg.get("drop_final_role_duplicates", True) and all(col in df.columns for col in dedupe_subset):
         before = len(df)
         df = df.drop_duplicates(

@@ -19,6 +19,7 @@ from tennis_pipeline.data_contracts import (
 )
 
 _NULL_RATE_THRESHOLDS: dict[str, float] = {
+    "MatchId": 0.0,
     "EventId": 0.0,
     "StartDate": 0.0,
     "WinningPlayerId": 1.0,
@@ -26,6 +27,7 @@ _NULL_RATE_THRESHOLDS: dict[str, float] = {
     "PlayerTeam2.PlayerId": 0.0,
     "PlayerTeam1.SglRollRank": 0.10,
     "PlayerTeam2.SglRollRank": 0.10,
+    "event_id": 0.0,
     "match_id": 0.0,
     "match_date": 0.0,
     "team1_player_id": 0.0,
@@ -191,6 +193,7 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
         "01_load_raw": StageValidationSpec(
             required_columns=RAW_INPUT_CONTRACT.required_columns,
             null_rate_columns=(
+                "MatchId",
                 "EventId",
                 "StartDate",
                 "PlayerTeam1.PlayerId",
@@ -202,6 +205,7 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
         ),
         "02_clean_schema": StageValidationSpec(
             required_columns=(
+                "event_id",
                 "match_id",
                 "match_date",
                 "winner_player_id",
@@ -210,10 +214,11 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "team1_sgl_roll_rank",
                 "team2_sgl_roll_rank",
             ),
-            null_rate_columns=("match_id", "match_date", "team1_player_id", "team2_player_id"),
+            null_rate_columns=("event_id", "match_id", "match_date", "team1_player_id", "team2_player_id"),
         ),
         "03_clean_values": StageValidationSpec(
             required_columns=(
+                "event_id",
                 "match_id",
                 "match_date",
                 "winner_player_id",
@@ -228,6 +233,7 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "team2_sgl_roll_rank": "numeric",
             },
             null_rate_columns=(
+                "event_id",
                 "match_id",
                 "match_date",
                 "winner_player_id",
@@ -236,10 +242,11 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "team1_sgl_roll_rank",
                 "team2_sgl_roll_rank",
             ),
-            duplicate_key_sets=(("match_id", "team1_player_id", "team2_player_id"),),
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
         ),
         "04_split_roles": StageValidationSpec(
             required_columns=(
+                "event_id",
                 "match_id",
                 "match_date",
                 "winner_player_id",
@@ -256,13 +263,14 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "team1_wins": "numeric",
             },
             null_rate_columns=(
+                "event_id",
                 "match_id",
                 "match_date",
                 "team1_player_id",
                 "team2_player_id",
                 "team1_wins",
             ),
-            duplicate_key_sets=(("match_id", "team1_player_id", "team2_player_id"),),
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
         ),
         "05_build_features_static": StageValidationSpec(
             contract=CLEANED_INTERIM_CONTRACT,
@@ -272,12 +280,12 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "surface_context",
                 "court_context",
             ),
-            duplicate_key_sets=(("match_id", "team1_player_id", "team2_player_id"),),
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
         ),
         "06_build_features_temporal_elo": StageValidationSpec(
             contract=CLEANED_INTERIM_CONTRACT,
             null_rate_columns=("elo_diff_team1",),
-            duplicate_key_sets=(("match_id", "team1_player_id", "team2_player_id"),),
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
             check_temporal_monotonicity=True,
         ),
         "07_finalize_model_table": StageValidationSpec(
@@ -293,7 +301,7 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
                 "elo_diff_team1",
                 "team1_wins",
             ),
-            duplicate_key_sets=(("match_id", "match_seq"),),
+            duplicate_key_sets=(("event_id", "match_id", "match_seq"),),
             check_temporal_monotonicity=True,
             check_leakage_guard=True,
         ),
