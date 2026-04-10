@@ -12,10 +12,18 @@ Given ``feature_prefix`` (default: ``"elo"``), this step appends:
 Temporal safeguard
 ------------------
 Rows are processed in strict chronological order (``match_date`` then
-``match_id`` then original row position for deterministic ties). Elo features
-for a row are computed *before* applying that row's outcome update.
+``match_seq`` when available else ``match_id`` then original row position for
+deterministic ties). Elo features for a row are computed *before* applying that
+row's outcome update.
 Therefore each row can only depend on prior rows in this temporal order,
 preventing look-ahead leakage.
+
+Canonical ordering invariant
+----------------------------
+This stage is the canonical ordering point for downstream steps. From this
+point onward, output rows are globally ordered by temporal keys:
+``match_date`` then (``match_seq`` if present, otherwise ``match_id``), with a
+stable row-position tie-breaker.
 """
 
 from __future__ import annotations
@@ -85,6 +93,18 @@ def _validate_required_columns(df: pd.DataFrame) -> None:
         raise ValueError(f"[build_features_temporal_elo] Missing required columns: {missing}")
 
 
+def _temporal_sort_columns(df: pd.DataFrame, *, stable_tie_breaker: str) -> list[str]:
+    """Resolve canonical temporal sort keys used by validation and downstream stages."""
+
+    sort_cols = ["match_date"]
+    if "match_seq" in df.columns:
+        sort_cols.append("match_seq")
+    elif "match_id" in df.columns:
+        sort_cols.append("match_id")
+    sort_cols.append(stable_tie_breaker)
+    return sort_cols
+
+
 def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd.DataFrame:
     """Add strict temporal Elo features and merge them back onto input rows."""
 
@@ -101,7 +121,6 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     time_col = "match_date"
     team1_col = "team1_player_id"
     team2_col = "team2_player_id"
-    match_id_col = "match_id" if "match_id" in out.columns else None
 
     working = out.copy(deep=True)
     working[time_col] = pd.to_datetime(working[time_col], errors="coerce", utc=False)
@@ -109,10 +128,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
         bad_count = int(working[time_col].isna().sum())
         raise ValueError(f"[build_features_temporal_elo] Found {bad_count} rows with invalid match_date")
 
-    sort_cols = [time_col]
-    if match_id_col:
-        sort_cols.append(match_id_col)
-    sort_cols.append("row_id")
+    sort_cols = _temporal_sort_columns(working, stable_tie_breaker="row_id")
 
     working = working.sort_values(sort_cols, ascending=True, kind="mergesort")
 
@@ -170,11 +186,9 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     features = working[["row_id", *elo_cols]].set_index("row_id")
     out = out.set_index("row_id").join(features, how="left").reset_index()
 
-    final_sort_cols = [time_col]
-    if match_id_col:
-        final_sort_cols.append(match_id_col)
-    final_sort_cols.append("row_id")
-
+    # Canonical ordering point: from here onward, rows are globally sorted by
+    # match_date and validation-consistent temporal keys, with stable tie breaks.
+    final_sort_cols = _temporal_sort_columns(out, stable_tie_breaker="row_id")
     out = out.sort_values(final_sort_cols, ascending=True, kind="mergesort").reset_index(drop=True)
     out = out.drop(columns=["row_id"])
 
