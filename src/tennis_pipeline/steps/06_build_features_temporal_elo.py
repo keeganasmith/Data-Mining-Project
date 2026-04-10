@@ -168,6 +168,14 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     ]
 
     features = working[["row_id", *elo_cols]].set_index("row_id")
-    out = out.set_index("row_id").join(features, how="left").reset_index(drop=True)
+    out = out.set_index("row_id").join(features, how="left").reset_index()
+
+    final_sort_cols = [time_col]
+    if match_id_col:
+        final_sort_cols.append(match_id_col)
+    final_sort_cols.append("row_id")
+
+    out = out.sort_values(final_sort_cols, ascending=True, kind="mergesort").reset_index(drop=True)
+    out = out.drop(columns=["row_id"])
 
     return out
