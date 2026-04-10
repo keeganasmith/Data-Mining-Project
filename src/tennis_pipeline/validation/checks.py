@@ -17,6 +17,7 @@ from tennis_pipeline.data_contracts import (
     validate_key_constraints,
     validate_required_columns,
 )
+from tennis_pipeline.temporal_ordering import prepare_temporal_ordering
 
 _NULL_RATE_THRESHOLDS: dict[str, float] = {
     "MatchId": 0.0,
@@ -146,16 +147,21 @@ def check_temporal_monotonicity_for_elo(df: pd.DataFrame, *, step_name: str) -> 
     if len(df) <= 1:
         return
 
-    sort_cols = ["match_date"]
-    if "match_seq" in df.columns:
-        sort_cols.append("match_seq")
-    elif "match_id" in df.columns:
-        sort_cols.append("match_id")
+    working = df.copy(deep=False)
+    working["__order_row_pos"] = range(len(working))
+    working, sort_cols, tie_breaker_text, _temp_cols = prepare_temporal_ordering(
+        working, stable_tie_breaker="__order_row_pos"
+    )
+    sorted_df = working.sort_values(sort_cols, kind="mergesort")
 
-    sorted_df = df.sort_values(sort_cols, kind="mergesort")
-    if not sorted_df.index.equals(df.index):
+    expected_order = pd.Series(range(len(working)), name="__order_row_pos")
+    observed_order = sorted_df["__order_row_pos"].reset_index(drop=True)
+    if not observed_order.equals(expected_order):
+        mismatch_positions = observed_order[observed_order != expected_order].head(3).index.tolist()
         raise ValueError(
-            f"[{step_name}] Temporal monotonicity violated; expected non-decreasing order by {sort_cols}"
+            f"[{step_name}] Temporal monotonicity violated; expected non-decreasing order by {sort_cols}. "
+            f"Tie-breaker applied: {tie_breaker_text}, then stable row order. "
+            f"First mismatched positions={mismatch_positions}"
         )
 
 
