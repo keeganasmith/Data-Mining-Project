@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from typing import Any
+from tennis_pipeline.temporal_ordering import prepare_temporal_ordering
 
 import pandas as pd
 
@@ -159,4 +160,9 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     out = add_rank_and_race_diff_features(out, drop_missing_rank_diff=cfg.get("drop_missing_rank_diff", True))
     out = normalize_surface_context(out)
 
+    out["__order_row_pos"] = range(len(out))
+    out, sort_cols, tie_breaker_text, _temp_cols = prepare_temporal_ordering(
+        out, stable_tie_breaker="__order_row_pos"
+    )
+    out = out.sort_values(sort_cols, kind="mergesort")
     return out
