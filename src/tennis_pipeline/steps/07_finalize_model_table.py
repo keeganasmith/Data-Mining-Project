@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 
+from tennis_pipeline.temporal_ordering import prepare_temporal_ordering
+
 _DEFAULT_CONFIG: dict[str, Any] = {
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
@@ -134,5 +136,15 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     finalized = out.loc[:, final_columns].copy(deep=True)
     finalized[target_column] = pd.to_numeric(finalized[target_column], errors="coerce").astype("Int64")
+
+    local_row_index_col = "__finalize_row_order"
+    finalized[local_row_index_col] = range(len(finalized))
+
+    finalized, sort_cols, _, temp_cols = prepare_temporal_ordering(
+        finalized,
+        stable_tie_breaker=local_row_index_col,
+    )
+    finalized = finalized.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+    finalized = finalized.drop(columns=[*temp_cols, local_row_index_col], errors="ignore")
 
     return finalized
