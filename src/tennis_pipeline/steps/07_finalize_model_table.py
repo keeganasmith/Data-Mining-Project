@@ -10,7 +10,7 @@ import pandas as pd
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "target_column": "team1_wins",
-    "id_columns": ["match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
+    "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "preferred_feature_order": [
         "rank_diff",
         "abs_rank_diff",
@@ -65,7 +65,7 @@ def _ensure_temporal_sequence(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy(deep=True)
     out["_row_order"] = range(len(out))
 
-    sort_cols = [c for c in ("match_date", "match_id", "_row_order") if c in out.columns]
+    sort_cols = [c for c in ("match_date", "event_id", "match_id", "_row_order") if c in out.columns]
     if sort_cols:
         sorted_idx = out.sort_values(sort_cols, kind="mergesort").index
         seq = pd.Series(range(1, len(out) + 1), index=sorted_idx)

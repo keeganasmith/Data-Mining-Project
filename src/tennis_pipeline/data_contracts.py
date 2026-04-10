@@ -51,6 +51,7 @@ class TableContract:
 RAW_INPUT_CONTRACT = TableContract(
     name="raw_input",
     required_columns=(
+        "MatchId",
         "EventId",
         "StartDate",
         "WinningPlayerId",
@@ -60,7 +61,8 @@ RAW_INPUT_CONTRACT = TableContract(
         "PlayerTeam2.SglRollRank",
     ),
     canonical_column_names={
-        "EventId": "match_id",
+        "MatchId": "match_id",
+        "EventId": "event_id",
         "StartDate": "match_date",
         "WinningPlayerId": "winner_player_id",
         "PlayerTeam1.PlayerId": "team1_player_id",
@@ -73,6 +75,7 @@ RAW_INPUT_CONTRACT = TableContract(
         "Court": "court_context",
     },
     dtypes={
+        "MatchId": "string",
         "EventId": "string",
         "StartDate": "datetime",
         "WinningPlayerId": "string",
@@ -83,12 +86,13 @@ RAW_INPUT_CONTRACT = TableContract(
     },
     keys=KeyConstraint(
         required_columns=(
+            "MatchId",
             "EventId",
             "StartDate",
             "PlayerTeam1.PlayerId",
             "PlayerTeam2.PlayerId",
         ),
-        unique_together=(("EventId", "PlayerTeam1.PlayerId", "PlayerTeam2.PlayerId"),),
+        unique_together=(("EventId", "MatchId", "PlayerTeam1.PlayerId", "PlayerTeam2.PlayerId"),),
     ),
 )
 
@@ -96,6 +100,7 @@ RAW_INPUT_CONTRACT = TableContract(
 CLEANED_INTERIM_CONTRACT = TableContract(
     name="cleaned_interim",
     required_columns=(
+        "event_id",
         "match_id",
         "match_date",
         "winner_player_id",
@@ -108,6 +113,7 @@ CLEANED_INTERIM_CONTRACT = TableContract(
         "court_context",
     ),
     canonical_column_names={
+        "event_id": "event_id",
         "match_id": "match_id",
         "match_date": "match_date",
         "winner_player_id": "winner_player_id",
@@ -120,6 +126,7 @@ CLEANED_INTERIM_CONTRACT = TableContract(
         TARGET_COLUMN: TARGET_COLUMN,
     },
     dtypes={
+        "event_id": "string",
         "match_id": "string",
         "match_date": "datetime",
         "winner_player_id": "string",
@@ -132,8 +139,8 @@ CLEANED_INTERIM_CONTRACT = TableContract(
         TARGET_COLUMN: "bool_or_int",
     },
     keys=KeyConstraint(
-        required_columns=("match_id", "match_date", "team1_player_id", "team2_player_id"),
-        unique_together=(("match_id", "team1_player_id", "team2_player_id"),),
+        required_columns=("event_id", "match_id", "match_date", "team1_player_id", "team2_player_id"),
+        unique_together=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
     ),
 )
 
@@ -141,6 +148,7 @@ CLEANED_INTERIM_CONTRACT = TableContract(
 FINAL_MODEL_CONTRACT = TableContract(
     name="final_model_ready",
     required_columns=(
+        "event_id",
         "match_id",
         "match_date",
         "match_seq",
@@ -154,6 +162,7 @@ FINAL_MODEL_CONTRACT = TableContract(
         TARGET_COLUMN,
     ),
     canonical_column_names={
+        "event_id": "event_id",
         "match_id": "match_id",
         "match_date": "match_date",
         "match_seq": "match_seq",
@@ -167,6 +176,7 @@ FINAL_MODEL_CONTRACT = TableContract(
         TARGET_COLUMN: TARGET_COLUMN,
     },
     dtypes={
+        "event_id": "string",
         "match_id": "string",
         "match_date": "datetime",
         "match_seq": "numeric",
@@ -180,8 +190,8 @@ FINAL_MODEL_CONTRACT = TableContract(
         TARGET_COLUMN: "bool_or_int",
     },
     keys=KeyConstraint(
-        required_columns=("match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"),
-        unique_together=(("match_id", "match_seq"),),
+        required_columns=("event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"),
+        unique_together=(("event_id", "match_id", "match_seq"),),
     ),
 )
 

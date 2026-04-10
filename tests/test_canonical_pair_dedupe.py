@@ -9,6 +9,7 @@ class CanonicalPairDedupeTests(unittest.TestCase):
         fixture = pd.DataFrame(
             [
                 {
+                    "event_id": "e1",
                     "match_id": "m1",
                     "match_date": "2024-01-01",
                     "winner_player_id": "A",
@@ -18,6 +19,7 @@ class CanonicalPairDedupeTests(unittest.TestCase):
                     "team2_sgl_roll_rank": 11,
                 },
                 {
+                    "event_id": "e1",
                     "match_id": "m1",
                     "match_date": "2024-01-01",
                     "winner_player_id": "A",
@@ -38,7 +40,7 @@ class CanonicalPairDedupeTests(unittest.TestCase):
 
         split_df = split_roles.run(clean_df)
         duplicate_count = split_df.duplicated(
-            subset=["match_id", "team1_player_id", "team2_player_id"]
+            subset=["event_id", "match_id", "team1_player_id", "team2_player_id"]
         ).sum()
         self.assertEqual(0, int(duplicate_count))
 

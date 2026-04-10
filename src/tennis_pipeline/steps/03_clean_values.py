@@ -10,6 +10,7 @@ import pandas as pd
 _DEFAULT_CONFIG: dict[str, Any] = {
     "drop_missing_required": True,
     "required_non_null_columns": (
+        "event_id",
         "match_id",
         "match_date",
         "winner_player_id",
@@ -18,9 +19,9 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     ),
     "coerce_datetime_columns": ("match_date",),
     "coerce_numeric_columns": ("team1_sgl_roll_rank", "team2_sgl_roll_rank"),
-    "drop_duplicate_subset": ("match_id", "team1_player_id", "team2_player_id"),
+    "drop_duplicate_subset": ("event_id", "match_id", "team1_player_id", "team2_player_id"),
     "drop_canonical_pair_duplicates": True,
-    "canonical_pair_subset": ("match_id", "team1_player_id", "team2_player_id"),
+    "canonical_pair_subset": ("event_id", "match_id", "team1_player_id", "team2_player_id"),
     "canonical_pair_keep": "first",
     "invalid_filters": {
         "team1_not_team2": True,
@@ -28,6 +29,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "positive_rank": True,
     },
     "coerce_string_columns": (
+        "event_id",
         "match_id",
         "winner_player_id",
         "team1_player_id",
@@ -103,15 +105,15 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     canonical_subset = [c for c in cfg["canonical_pair_subset"] if c in df.columns]
     can_dedupe_enabled = cfg.get("drop_canonical_pair_duplicates", True)
-    if can_dedupe_enabled and len(canonical_subset) == 3:
-        match_col, team1_col, team2_col = canonical_subset
+    if can_dedupe_enabled and len(canonical_subset) == 4:
+        event_col, match_col, team1_col, team2_col = canonical_subset
         pair_frame = df[[team1_col, team2_col]].astype("string")
         df["_p_low"] = pair_frame.min(axis=1)
         df["_p_high"] = pair_frame.max(axis=1)
 
         before = len(df)
         df = df.drop_duplicates(
-            subset=[match_col, "_p_low", "_p_high"],
+            subset=[event_col, match_col, "_p_low", "_p_high"],
             keep=cfg.get("canonical_pair_keep", "first"),
         ).copy(deep=True)
         dropped = before - len(df)
