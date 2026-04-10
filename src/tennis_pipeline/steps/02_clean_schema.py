@@ -13,6 +13,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "column_aliases": {},
     "required_columns": None,
     "enforce_required_schema": True,
+    
 }
 
 

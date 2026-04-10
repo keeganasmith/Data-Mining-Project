@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-
+import joblib
 import pandas as pd
 
 _DEFAULT_PARSE_CONFIG: dict[str, Any] = {
@@ -39,10 +39,11 @@ def _load_from_path(path: str | Path, read_csv_kwargs: Mapping[str, Any]) -> pd.
         return pd.read_csv(path_obj, **dict(read_csv_kwargs))
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path_obj, **dict(read_csv_kwargs))
-
+    if suffix in {".joblib"}:
+        return joblib.load(path_obj, **dict(read_csv_kwargs))
     raise ValueError(
         "Unsupported file extension for load step. "
-        "Supported: .csv, .txt, .parquet, .pq"
+        "Supported: .csv, .txt, .parquet, .pq, .joblib"
     )
 
 
@@ -76,7 +77,7 @@ def run(df_or_path: pd.DataFrame | str | Path, config: Mapping[str, Any] | None 
 
     if cfg.get("trim_column_names", True):
         df.columns = [str(col).strip() for col in df.columns]
-
+    
     if cfg.get("drop_unnamed_columns", True):
         keep_cols = [col for col in df.columns if not str(col).startswith("Unnamed:")]
         df = df.loc[:, keep_cols].copy(deep=True)

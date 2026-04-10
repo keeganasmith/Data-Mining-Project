@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import sys
+import os
+
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
 
 from tennis_pipeline.config import PIPELINE_DEFAULTS
 from tennis_pipeline.validation.checks import run_stage_checks

@@ -27,6 +27,12 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "winner_in_teams": True,
         "positive_rank": True,
     },
+    "coerce_string_columns": (
+        "match_id",
+        "winner_player_id",
+        "team1_player_id",
+        "team2_player_id",
+    )
 }
 
 
@@ -39,6 +45,7 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "required_non_null_columns",
         "coerce_datetime_columns",
         "coerce_numeric_columns",
+        "coerce_string_columns",
         "drop_duplicate_subset",
         "canonical_pair_subset",
     ):
@@ -81,6 +88,10 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    for col in cfg["coerce_string_columns"]:
+        if col in df.columns:
+            df[col] = df[col].astype("string")
+            
     if cfg.get("drop_missing_required", True):
         required_present = [c for c in cfg["required_non_null_columns"] if c in df.columns]
         if required_present:

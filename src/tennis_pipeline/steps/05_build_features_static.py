@@ -56,13 +56,9 @@ def _as_numeric(series: pd.Series) -> pd.Series:
 
 
 def build_paired_player_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Build generic paired features from Team1/Team2 columns.
-
-    For numeric pairs, creates ``diff_*`` and ``abs_diff_*``.
-    For categorical/text pairs, creates ``same_*`` (0/1).
-    """
-
     out = df.copy(deep=True)
+
+    new_cols = {}
 
     for team1_col, team2_col, feat in _candidate_pairs(out):
         s1 = out[team1_col]
@@ -73,12 +69,15 @@ def build_paired_player_features(df: pd.DataFrame) -> pd.DataFrame:
         numeric_coverage = (n1.notna() | n2.notna()).mean() if len(out) else 0.0
 
         if numeric_coverage >= 0.5:
-            out[f"diff_{feat}"] = n1 - n2
-            out[f"abs_diff_{feat}"] = (n1 - n2).abs()
+            new_cols[f"diff_{feat}"] = n1 - n2
+            new_cols[f"abs_diff_{feat}"] = (n1 - n2).abs()
         else:
             left = s1.astype("string").str.strip().str.lower()
             right = s2.astype("string").str.strip().str.lower()
-            out[f"same_{feat}"] = (left == right).fillna(False).astype(int)
+            new_cols[f"same_{feat}"] = (left == right).fillna(False).astype(int)
+
+    # Add all columns at once (key fix)
+    out = pd.concat([out, pd.DataFrame(new_cols)], axis=1)
 
     return out
 
