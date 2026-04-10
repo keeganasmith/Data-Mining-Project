@@ -12,13 +12,7 @@ from typing import Any
 import pandas as pd
 
 from tennis_pipeline.config import PIPELINE_DEFAULTS
-from tennis_pipeline.data_contracts import (
-    CLEANED_INTERIM_CONTRACT,
-    FINAL_MODEL_CONTRACT,
-    RAW_INPUT_CONTRACT,
-    validate_required_columns,
-    validate_table,
-)
+from tennis_pipeline.validation.checks import run_stage_checks
 
 STEP_MODULES: tuple[str, ...] = (
     "01_load_raw",
@@ -77,44 +71,6 @@ def _load_config(config_path: str | Path | None) -> dict[str, dict[str, Any]]:
     return config
 
 
-def _validate_stage(df: pd.DataFrame, step_name: str) -> None:
-    """Run stage-appropriate validation checks after each step."""
-
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError(f"[{step_name}] Step output must be a pandas DataFrame")
-    if df.columns.duplicated().any():
-        dupes = df.columns[df.columns.duplicated()].tolist()
-        raise ValueError(f"[{step_name}] Output has duplicate columns: {dupes}")
-
-    if step_name == "01_load_raw":
-        validate_required_columns(df, RAW_INPUT_CONTRACT)
-    elif step_name == "02_clean_schema":
-        required_canonical = [
-            RAW_INPUT_CONTRACT.canonical_column_names.get(col, col)
-            for col in RAW_INPUT_CONTRACT.required_columns
-        ]
-        missing = [col for col in required_canonical if col not in df.columns]
-        if missing:
-            raise ValueError(f"[{step_name}] Missing canonical required columns: {missing}")
-    elif step_name in {"03_clean_values", "04_split_roles"}:
-        required = [
-            "match_id",
-            "match_date",
-            "winner_player_id",
-            "team1_player_id",
-            "team2_player_id",
-            "team1_sgl_roll_rank",
-            "team2_sgl_roll_rank",
-        ]
-        missing = [col for col in required if col not in df.columns]
-        if missing:
-            raise ValueError(f"[{step_name}] Missing required cleaned columns: {missing}")
-    elif step_name in {"05_build_features_static", "06_build_features_temporal_elo"}:
-        validate_table(df, CLEANED_INTERIM_CONTRACT)
-    elif step_name == "07_finalize_model_table":
-        validate_table(df, FINAL_MODEL_CONTRACT)
-
-
 def _ensure_elo_feature_when_disabled(df: pd.DataFrame) -> pd.DataFrame:
     """Provide default Elo columns when --use-elo is not enabled."""
 
@@ -153,7 +109,7 @@ def run_pipeline(
             if not isinstance(current, pd.DataFrame):
                 raise TypeError("Pipeline state must be DataFrame before Elo toggle branch")
             current = _ensure_elo_feature_when_disabled(current)
-            _validate_stage(current, step_name)
+            run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
             continue
 
@@ -164,7 +120,7 @@ def run_pipeline(
         if not isinstance(current, pd.DataFrame):
             raise TypeError(f"[{step_name}] Expected DataFrame output from step module")
 
-        _validate_stage(current, step_name)
+        run_stage_checks(current, step_name)
         current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
 
     final_df = current
