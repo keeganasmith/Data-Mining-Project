@@ -15,6 +15,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "team2_id_column": "team2_player_id",
     "target_column": "team1_wins",
     "drop_invalid_winner_rows": True,
+    "drop_final_role_duplicates": True,
+    "final_role_duplicates_keep": "first",
 }
 
 
@@ -30,6 +32,9 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     seed = normalized.get("random_seed")
     if not isinstance(seed, int):
         raise TypeError("config['random_seed'] must be an int")
+
+    if normalized.get("final_role_duplicates_keep") not in {"first", "last", False}:
+        raise TypeError("config['final_role_duplicates_keep'] must be one of {'first', 'last', False}")
 
     return normalized
 
@@ -114,5 +119,14 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     # Target is fully determined by deterministic role assignment.
     df[target_col] = (~swap).astype(int)
+
+    dedupe_subset = ["match_id", team1_id_col, team2_id_col]
+    if cfg.get("drop_final_role_duplicates", True) and all(col in df.columns for col in dedupe_subset):
+        before = len(df)
+        df = df.drop_duplicates(
+            subset=dedupe_subset,
+            keep=cfg.get("final_role_duplicates_keep", "first"),
+        ).copy(deep=True)
+        df.attrs["final_role_duplicates_dropped"] = before - len(df)
 
     return df
