@@ -33,6 +33,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "loser_id",
         "winning_player_id",
         "result",
+        # Legacy alias dropped after canonicalization via _resolve_elo_aliases.
         "elo_diff_pre",
     ],
 }
@@ -79,6 +80,8 @@ def _ensure_temporal_sequence(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _resolve_elo_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Elo differential aliases to canonical ``elo_diff_team1``."""
+
     out = df.copy(deep=True)
     if "elo_diff_team1" not in out.columns and "elo_diff_pre" in out.columns:
         out["elo_diff_team1"] = out["elo_diff_pre"]

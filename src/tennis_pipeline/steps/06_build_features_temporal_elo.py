@@ -6,7 +6,8 @@ Given ``feature_prefix`` (default: ``"elo"``), this step appends:
 
 - ``{prefix}_team1_pre``: Team1 player's Elo immediately before the match.
 - ``{prefix}_team2_pre``: Team2 player's Elo immediately before the match.
-- ``{prefix}_diff_pre``: pre-match Elo differential (Team1 - Team2).
+- ``{prefix}_diff_team1``: pre-match Elo differential (Team1 - Team2), canonical name.
+- ``{prefix}_diff_pre``: legacy alias emitted for backward compatibility.
 - ``{prefix}_prob_team1_pre``: Team1 expected win probability from pre-match Elo.
 
 Temporal safeguard
@@ -165,12 +166,15 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     prefix = cfg["feature_prefix"]
     working[f"{prefix}_team1_pre"] = team1_pre_vals
     working[f"{prefix}_team2_pre"] = team2_pre_vals
+    working[f"{prefix}_diff_team1"] = diff_pre_vals
+    # Legacy compatibility alias; prefer ``{prefix}_diff_team1`` downstream.
     working[f"{prefix}_diff_pre"] = diff_pre_vals
     working[f"{prefix}_prob_team1_pre"] = prob_pre_vals
 
     elo_cols = [
         f"{prefix}_team1_pre",
         f"{prefix}_team2_pre",
+        f"{prefix}_diff_team1",
         f"{prefix}_diff_pre",
         f"{prefix}_prob_team1_pre",
     ]
