@@ -117,13 +117,13 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     z_by_feature: dict[str, np.ndarray] = {}
     for feature_col in selected_cols:
-        z_values = np.zeros(len(working), dtype=float)
+        z_values = pd.Series(np.zeros(len(working), dtype=float), index=working.index, dtype=float)
         for _surface, idx in working.groupby(surface_col, dropna=False).groups.items():
             values = working.loc[idx, feature_col]
             center = float(values.median())
             scale = _safe_scale(values)
-            z_values[np.asarray(idx)] = (values.to_numpy(dtype=float) - center) / scale
-        z_by_feature[feature_col] = z_values
+            z_values.loc[idx] = (values.to_numpy(dtype=float) - center) / scale
+        z_by_feature[feature_col] = z_values.to_numpy(dtype=float)
 
     z_matrix = np.column_stack([np.abs(z_by_feature[c]) for c in selected_cols])
     anomaly_score = z_matrix.mean(axis=1)
