@@ -27,6 +27,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "emit_surface_anomaly_z": True,
     "drop_rows_all_missing": False,
     "knn_neighbors": 10,
+    "knn_reference_size": 5000,
+    "knn_chunk_size": 2048,
     "random_state": 42,
     "artifact_output_dir": None,
     "artifact_top_n": 25,
@@ -54,6 +56,14 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     knn_neighbors = normalized.get("knn_neighbors")
     if not isinstance(knn_neighbors, int) or knn_neighbors < 1:
         raise TypeError("config['knn_neighbors'] must be an int >= 1")
+
+    knn_reference_size = normalized.get("knn_reference_size")
+    if not isinstance(knn_reference_size, int) or knn_reference_size < 2:
+        raise TypeError("config['knn_reference_size'] must be an int >= 2")
+
+    knn_chunk_size = normalized.get("knn_chunk_size")
+    if not isinstance(knn_chunk_size, int) or knn_chunk_size < 1:
+        raise TypeError("config['knn_chunk_size'] must be an int >= 1")
 
     for key in ("emit_surface_anomaly_z", "drop_rows_all_missing"):
         if not isinstance(normalized.get(key), bool):
@@ -108,15 +118,43 @@ def _minmax(values: np.ndarray) -> np.ndarray:
     return (values - min_value) / (max_value - min_value)
 
 
-def _knn_distance_score(matrix: np.ndarray, k_neighbors: int) -> np.ndarray:
+def _knn_distance_score(
+    matrix: np.ndarray,
+    k_neighbors: int,
+    *,
+    random_state: int | None,
+    reference_size: int,
+    chunk_size: int,
+) -> np.ndarray:
     if len(matrix) <= 1:
         return np.zeros(len(matrix), dtype=float)
 
-    k = min(max(1, int(k_neighbors)), len(matrix) - 1)
-    diffs = matrix[:, None, :] - matrix[None, :, :]
-    distances = np.sqrt(np.sum(diffs * diffs, axis=2))
-    np.fill_diagonal(distances, np.inf)
-    kth_distances = np.partition(distances, kth=k - 1, axis=1)[:, k - 1]
+    n_rows = len(matrix)
+    use_full_reference = n_rows <= reference_size
+    if use_full_reference:
+        ref_indices = np.arange(n_rows, dtype=int)
+    else:
+        rng = np.random.default_rng(random_state)
+        ref_indices = np.sort(rng.choice(n_rows, size=reference_size, replace=False))
+
+    ref_matrix = matrix[ref_indices]
+    k = min(max(1, int(k_neighbors)), len(ref_matrix) - 1)
+    kth_distances = np.zeros(n_rows, dtype=float)
+
+    for start in range(0, n_rows, chunk_size):
+        stop = min(start + chunk_size, n_rows)
+        block = matrix[start:stop]
+        diffs = block[:, None, :] - ref_matrix[None, :, :]
+        squared_distances = np.sum(diffs * diffs, axis=2, dtype=np.float64)
+        block_distances = np.sqrt(squared_distances).astype(float, copy=False)
+
+        if use_full_reference:
+            block_indices = np.arange(start, stop, dtype=int)
+            local_ref_pos = block_indices - start
+            block_distances[local_ref_pos, block_indices] = np.inf
+
+        kth_distances[start:stop] = np.partition(block_distances, kth=k - 1, axis=1)[:, k - 1]
+
     return _minmax(kth_distances)
 
 
@@ -281,7 +319,13 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     robust_z_score_norm = _minmax(robust_z_score)
 
     feature_matrix = working[selected_cols].to_numpy(dtype=float)
-    knn_score_norm = _knn_distance_score(feature_matrix, int(cfg["knn_neighbors"]))
+    knn_score_norm = _knn_distance_score(
+        feature_matrix,
+        int(cfg["knn_neighbors"]),
+        random_state=cfg["random_state"],
+        reference_size=int(cfg["knn_reference_size"]),
+        chunk_size=int(cfg["knn_chunk_size"]),
+    )
     iforest_score_norm = _iforest_score(feature_matrix, random_state=cfg["random_state"], n_trees=100)
 
     anomaly_score = np.mean(np.column_stack([robust_z_score_norm, knn_score_norm, iforest_score_norm]), axis=1)
