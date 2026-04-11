@@ -28,5 +28,8 @@ PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "06_build_features_temporal_elo": ELO_DEFAULTS,
     "06b_build_features_anomaly_surface": {
         "random_state": 42,
+        "knn_neighbors": 10,
+        "artifact_output_dir": None,
+        "artifact_top_n": 25,
     },
 }

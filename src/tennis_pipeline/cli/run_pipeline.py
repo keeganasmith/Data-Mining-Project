@@ -120,7 +120,9 @@ def run_pipeline(
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
-        step_config = cfg.get(step_name)
+        step_config = dict(cfg.get(step_name, {}))
+        if step_name == "06b_build_features_anomaly_surface":
+            step_config.setdefault("artifact_output_dir", str(out_root / "artifacts" / step_name))
         current = module.run(current, config=step_config)
 
         if not isinstance(current, pd.DataFrame):
