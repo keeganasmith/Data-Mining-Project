@@ -39,6 +39,8 @@ _NULL_RATE_THRESHOLDS: dict[str, float] = {
     "rank_diff": 0.05,
     "abs_rank_diff": 0.05,
     "elo_diff_team1": 0.02,
+    "anomaly_score": 0.0,
+    "anomaly_flag": 0.0,
     "surface_context": 0.10,
     "court_context": 0.10,
     "team1_wins": 0.0,
@@ -291,6 +293,15 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
         "06_build_features_temporal_elo": StageValidationSpec(
             contract=CLEANED_INTERIM_CONTRACT,
             null_rate_columns=("elo_diff_team1",),
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
+            check_temporal_monotonicity=True,
+        ),
+        "06b_build_features_anomaly_surface": StageValidationSpec(
+            contract=CLEANED_INTERIM_CONTRACT,
+            null_rate_columns=(
+                "anomaly_score",
+                "anomaly_flag",
+            ),
             duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
             check_temporal_monotonicity=True,
         ),

@@ -26,4 +26,7 @@ ELO_DEFAULTS: dict[str, Any] = {
 
 PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "06_build_features_temporal_elo": ELO_DEFAULTS,
+    "06b_build_features_anomaly_surface": {
+        "random_state": 42,
+    },
 }

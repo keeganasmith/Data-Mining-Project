@@ -26,6 +26,7 @@ STEP_MODULES: tuple[str, ...] = (
     "04_split_roles",
     "05_build_features_static",
     "06_build_features_temporal_elo",
+    "06b_build_features_anomaly_surface",
     "07_finalize_model_table",
 )
 
