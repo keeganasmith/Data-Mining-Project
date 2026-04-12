@@ -293,7 +293,46 @@ PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
 
 ---
 
-## 5) How to view resulting output
+
+## 5) Model training analytics (tree models)
+
+By default (`model_training.enabled: true`), the pipeline now trains:
+
+- Decision Tree
+- Random Forest
+- Gradient Boosted Decision Trees (GBDT)
+
+For each model, it sweeps `max_depth` values and writes:
+
+- `depth_accuracy_curves.csv` (training and validation accuracy by depth)
+- `depth_accuracy_curves.png` (training vs validation accuracy curves)
+- `model_summary_metrics.csv` (best depth, test accuracy, test ROC-AUC)
+- `roc_curve__decision_tree.png`
+- `roc_curve__random_forest.png`
+- `roc_curve__gbdt.png`
+- `model_training_manifest.json`
+
+All artifacts are written under:
+
+- `<output-dir>/processed/model_training/`
+
+### Example: customize depth sweep
+
+```json
+{
+  "model_training": {
+    "enabled": true,
+    "depth_values": [1, 2, 3, 4, 5, 6, 8, 10],
+    "rf_n_estimators": 300,
+    "gbdt_n_estimators": 300,
+    "gbdt_learning_rate": 0.05
+  }
+}
+```
+
+---
+
+## 6) How to view resulting output
 
 ## A) Inspect final model table schema + sample rows
 

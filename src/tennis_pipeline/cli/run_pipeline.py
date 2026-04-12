@@ -18,6 +18,7 @@ sys.path.insert(0, str(project_root))
 
 from tennis_pipeline.config import PIPELINE_DEFAULTS
 from tennis_pipeline.experiments.feature_sets import materialize_feature_sets
+from tennis_pipeline.experiments.model_training import run_model_training_experiments
 from tennis_pipeline.validation.checks import run_stage_checks
 
 STEP_MODULES: tuple[str, ...] = (
@@ -146,6 +147,10 @@ def run_pipeline(
     experiment_config = cfg.get("experiments")
     if isinstance(experiment_config, Mapping):
         materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+
+    model_training_config = cfg.get("model_training")
+    if isinstance(model_training_config, Mapping):
+        run_model_training_experiments(final_df, output_dir=processed_dir, config=model_training_config)
 
     return final_df
 
