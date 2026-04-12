@@ -298,6 +298,20 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
         ),
         "06b_build_features_anomaly_surface": StageValidationSpec(
             contract=CLEANED_INTERIM_CONTRACT,
+            required_columns=(
+                "anomaly_score",
+                "robust_z_anomaly_score",
+                "knn_anomaly_score",
+                "iforest_anomaly_score",
+                "anomaly_flag",
+            ),
+            dtype_expectations={
+                "anomaly_score": "numeric",
+                "robust_z_anomaly_score": "numeric",
+                "knn_anomaly_score": "numeric",
+                "iforest_anomaly_score": "numeric",
+                "anomaly_flag": "numeric",
+            },
             null_rate_columns=(
                 "anomaly_score",
                 "anomaly_flag",

@@ -27,7 +27,20 @@ ELO_DEFAULTS: dict[str, Any] = {
 PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "06_build_features_temporal_elo": ELO_DEFAULTS,
     "06b_build_features_anomaly_surface": {
+        "feature_columns": [
+            "rank_diff",
+            "abs_rank_diff",
+            "race_rank_diff",
+            "abs_race_rank_diff",
+            "elo_diff_team1",
+            "elo_prob_team1_pre",
+            "team1_sgl_roll_rank",
+            "team2_sgl_roll_rank",
+        ],
+        "contamination": 0.05,
         "random_state": 42,
+        # When True, anomaly z-scores are normalized within each surface.
+        "emit_surface_anomaly_z": True,
         "knn_neighbors": 10,
         "knn_reference_size": 5000,
         "knn_chunk_size": 2048,

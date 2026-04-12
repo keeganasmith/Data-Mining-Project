@@ -25,6 +25,7 @@ STEP_MODULES: tuple[str, ...] = (
     "03_clean_values",
     "04_split_roles",
     "05_build_features_static",
+    # Keep Elo before anomaly so anomaly scoring can optionally consume Elo-derived columns.
     "06_build_features_temporal_elo",
     "06b_build_features_anomaly_surface",
     "07_finalize_model_table",
@@ -97,6 +98,7 @@ def run_pipeline(
     output_dir: str | Path = "data",
     *,
     use_elo: bool = False,
+    use_anomaly: bool = False,
     config_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Execute all pipeline stages and persist stage/final artifacts."""
@@ -117,6 +119,8 @@ def run_pipeline(
             current = _ensure_elo_feature_when_disabled(current)
             run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+            continue
+        if step_name == "06b_build_features_anomaly_surface" and not use_anomaly:
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
@@ -160,6 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable temporal Elo feature stage (06_build_features_temporal_elo)",
     )
+    parser.add_argument(
+        "--use-anomaly",
+        action="store_true",
+        help="Enable surface-aware anomaly feature stage (06b_build_features_anomaly_surface)",
+    )
     return parser
 
 
@@ -170,6 +179,7 @@ def main() -> None:
         input_path=args.input_path,
         output_dir=args.output_dir,
         use_elo=bool(args.use_elo),
+        use_anomaly=bool(args.use_anomaly),
         config_path=args.config_path,
     )
 
