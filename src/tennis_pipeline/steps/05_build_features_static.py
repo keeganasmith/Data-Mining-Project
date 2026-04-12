@@ -140,8 +140,6 @@ def normalize_surface_context(df: pd.DataFrame) -> pd.DataFrame:
 
     if "court_context" in out.columns:
         out["court_context"] = out["court_context"].astype("string").fillna("Unknown")
-    elif "Court" in out.columns:
-        out["court_context"] = out["Court"].astype("string").fillna("Unknown")
     else:
         out["court_context"] = "Unknown"
 
