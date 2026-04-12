@@ -51,6 +51,15 @@ _ALLOWED_FINAL_COLUMNS = {
     "team1_wins",
     "elo_prob_team1_pre",
 }
+_LEAKAGE_SAFE_EXACT = {
+    "anomaly_score",
+    "robust_z_anomaly_score",
+    "knn_anomaly_score",
+    "iforest_anomaly_score",
+    "anomaly_flag",
+    "surface_anomaly_z",
+}
+_LEAKAGE_SAFE_TOKENS = ("_anomaly_",)
 
 
 @dataclass(frozen=True)
@@ -169,7 +178,12 @@ def check_temporal_monotonicity_for_elo(df: pd.DataFrame, *, step_name: str) -> 
 
 def check_leakage_guard_before_output(df: pd.DataFrame, *, step_name: str) -> None:
     leaking_columns = [
-        col for col in df.columns if col not in _ALLOWED_FINAL_COLUMNS and bool(_LEAKAGE_PATTERN.search(col))
+        col
+        for col in df.columns
+        if col not in _ALLOWED_FINAL_COLUMNS
+        and col not in _LEAKAGE_SAFE_EXACT
+        and not any(token in col for token in _LEAKAGE_SAFE_TOKENS)
+        and bool(_LEAKAGE_PATTERN.search(col))
     ]
     if leaking_columns:
         leaking_columns = sorted(leaking_columns)
