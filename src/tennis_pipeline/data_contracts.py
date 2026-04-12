@@ -72,7 +72,7 @@ RAW_INPUT_CONTRACT = TableContract(
         # Surface/court source aliases from notebook logic.
         "CourtSurface": "surface_context",
         "Court.Surface": "surface_context",
-        "Court": "court_context",
+        "Court": "surface_context",
     },
     dtypes={
         "MatchId": "string",
