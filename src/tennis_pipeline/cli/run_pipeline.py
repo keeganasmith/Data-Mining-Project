@@ -17,6 +17,7 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from tennis_pipeline.config import PIPELINE_DEFAULTS
+from tennis_pipeline.experiments.feature_sets import materialize_feature_sets
 from tennis_pipeline.validation.checks import run_stage_checks
 
 STEP_MODULES: tuple[str, ...] = (
@@ -141,6 +142,11 @@ def run_pipeline(
 
     final_path = processed_dir / "model_table.parquet"
     final_df.to_parquet(final_path, index=False)
+
+    experiment_config = cfg.get("experiments")
+    if isinstance(experiment_config, Mapping):
+        materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+
     return final_df
 
 
