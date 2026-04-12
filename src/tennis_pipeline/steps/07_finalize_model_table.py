@@ -31,7 +31,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "surface_context",
         "court_context",
     ],
-    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_"],
+    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_", "anom_"],
     "drop_columns": [
         "winner_player_id",
         "loser_player_id",
@@ -46,6 +46,9 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 
 # Post-match or target-adjacent columns that can create leakage in training.
 _LEAKAGE_PATTERN = re.compile(r"(winner|loser|result|score|outcome|post_|_post|after)", flags=re.IGNORECASE)
+_ANOMALY_SAFE_EXACT = {"anomaly_score", "anomaly_flag", "surface_anomaly_z"}
+_ANOMALY_SAFE_PREFIXES = ("anom_",)
+_ANOMALY_SAFE_TOKENS = ("_anomaly_",)
 
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -96,6 +99,12 @@ def _resolve_elo_aliases(df: pd.DataFrame) -> pd.DataFrame:
 
 def _is_leakage_column(col: str, target_column: str) -> bool:
     if col == target_column:
+        return False
+    if col in _ANOMALY_SAFE_EXACT:
+        return False
+    if col.startswith(_ANOMALY_SAFE_PREFIXES):
+        return False
+    if any(token in col for token in _ANOMALY_SAFE_TOKENS):
         return False
     return bool(_LEAKAGE_PATTERN.search(col))
 
