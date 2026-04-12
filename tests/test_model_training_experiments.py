@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pandas as pd
@@ -57,6 +59,44 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
 
             self.assertIn("models", manifest)
             self.assertEqual(3, len(manifest["models"]))
+
+    def test_debug_leakage_prints_suspicious_and_near_copy_features(self) -> None:
+        rows = []
+        for i in range(80):
+            target = 1 if i % 3 != 0 else 0
+            rows.append(
+                {
+                    "event_id": f"e{i//4}",
+                    "match_id": f"m{i}",
+                    "match_date": f"2024-01-{(i % 28) + 1:02d}",
+                    "match_seq": i,
+                    "team1_player_id": f"p{i}",
+                    "team2_player_id": f"q{i}",
+                    "surface_context": "Clay" if i % 2 == 0 else "Hard",
+                    "rank_diff": (i % 15) - 7,
+                    "winner_proxy_flag": target,
+                    "team1_wins": target,
+                }
+            )
+
+        df = pd.DataFrame(rows)
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmpdir, redirect_stdout(stdout):
+            run_model_training_experiments(
+                df,
+                output_dir=tmpdir,
+                config={
+                    "depth_values": [1],
+                    "rf_n_estimators": 10,
+                    "gbdt_n_estimators": 10,
+                    "debug_leakage": True,
+                },
+            )
+
+        output = stdout.getvalue()
+        self.assertIn("[leakage-debug] suspicious feature names:", output)
+        self.assertIn("winner_proxy_flag", output)
+        self.assertIn("[leakage-debug] near-perfect target copies detected:", output)
 
 
 if __name__ == "__main__":
