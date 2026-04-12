@@ -31,7 +31,7 @@ PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
         "knn_neighbors": 10,
         "knn_reference_size": 5000,
         "knn_chunk_size": 2048,
-        "artifact_output_dir": None,
+        "artifact_output_dir": "./outputs/anomaly.txt",
         "artifact_top_n": 25,
     },
 }

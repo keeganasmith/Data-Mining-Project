@@ -1,0 +1,12 @@
+{
+  "row_count": 92112,
+  "anomaly_flag_count": 4657,
+  "anomaly_flag_rate": 0.05055801632794858,
+  "score_columns": [
+    "anomaly_score",
+    "robust_z_anomaly_score",
+    "knn_anomaly_score",
+    "iforest_anomaly_score",
+    "anomaly_flag"
+  ]
+}

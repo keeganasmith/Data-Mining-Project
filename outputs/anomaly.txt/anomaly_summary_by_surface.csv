@@ -1,0 +1,2 @@
+surface_context,match_count,anomaly_score_mean,robust_z_score_mean,knn_score_mean,iforest_score_mean,anomaly_flag_rate
+Unknown,92112,0.05729279676456726,1.0140574871608918,0.026070657542345693,0.10396176046150125,0.05055801632794858
