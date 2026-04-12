@@ -12,6 +12,7 @@ import pandas as pd
 
 DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "enabled": True,
+    "debug_leakage": False,
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "date_column": "match_date",
@@ -33,6 +34,8 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 
     if not isinstance(cfg.get("enabled"), bool):
         raise TypeError("model_training config['enabled'] must be a bool")
+    if not isinstance(cfg.get("debug_leakage"), bool):
+        raise TypeError("model_training config['debug_leakage'] must be a bool")
 
     for key in ("target_column", "output_subdir", "date_column"):
         value = cfg.get(key)
@@ -63,6 +66,56 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 
     cfg["gbdt_learning_rate"] = float(cfg["gbdt_learning_rate"])
     return cfg
+
+
+def _print_leakage_debug_info(x: pd.DataFrame, y: pd.Series, *, target_column: str) -> None:
+    """Emit lightweight diagnostics to help identify label leakage."""
+    print(f"[leakage-debug] target='{target_column}' rows={len(x)} feature_count={len(x.columns)}")
+
+    suspicious_tokens = ("winner", "winning", "loser", "result", "score", "outcome")
+    suspicious_name_hits = sorted([c for c in x.columns if any(t in c.lower() for t in suspicious_tokens)])
+    if suspicious_name_hits:
+        print(f"[leakage-debug] suspicious feature names: {suspicious_name_hits}")
+    else:
+        print("[leakage-debug] suspicious feature names: none")
+
+    id_like_cols = sorted([c for c in x.columns if c.lower().endswith("_id") or ".id" in c.lower()])
+    if id_like_cols:
+        print(f"[leakage-debug] identifier-like columns still in feature matrix: {id_like_cols}")
+
+    numeric = x.select_dtypes(include=[np.number, "bool"])
+    corr_hits: list[tuple[str, float]] = []
+    for col in numeric.columns:
+        aligned = pd.concat([numeric[col], y], axis=1).dropna()
+        if len(aligned) < 25:
+            continue
+        corr = float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+        if np.isfinite(corr):
+            corr_hits.append((col, abs(corr)))
+
+    corr_hits = sorted(corr_hits, key=lambda item: item[1], reverse=True)
+    if corr_hits:
+        top = [f"{name}:{score:.3f}" for name, score in corr_hits[:8]]
+        print(f"[leakage-debug] top abs(feature,target) correlations: {top}")
+
+    near_perfect_hits: list[str] = []
+    y_numeric = pd.to_numeric(y, errors="coerce")
+    for col in numeric.columns:
+        feature = pd.to_numeric(numeric[col], errors="coerce")
+        aligned = pd.concat([feature, y_numeric], axis=1).dropna()
+        if len(aligned) < 25:
+            continue
+        feature_aligned = aligned.iloc[:, 0]
+        y_aligned = aligned.iloc[:, 1]
+        same_ratio = float((feature_aligned == y_aligned).mean())
+        inv_ratio = float((feature_aligned == (1 - y_aligned)).mean())
+        if same_ratio >= 0.95 or inv_ratio >= 0.95:
+            near_perfect_hits.append(f"{col}(same={same_ratio:.3f}, inverse={inv_ratio:.3f})")
+
+    if near_perfect_hits:
+        print(f"[leakage-debug] near-perfect target copies detected: {near_perfect_hits}")
+    else:
+        print("[leakage-debug] near-perfect target copies detected: none")
 
 
 def _temporal_split(df: pd.DataFrame, *, date_column: str, test_size: float, validation_size: float) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -138,6 +191,8 @@ def run_model_training_experiments(
 
     y = model_df[target_column].astype(int)
     x = model_df.drop(columns=[target_column])
+    if cfg["debug_leakage"]:
+        _print_leakage_debug_info(x, y, target_column=target_column)
 
     split_df = x.copy(deep=True)
     split_df[target_column] = y
