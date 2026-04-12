@@ -45,7 +45,12 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 # Post-match or target-adjacent columns that can create leakage in training.
-_LEAKAGE_PATTERN = re.compile(r"(winner|loser|result|score|outcome|post_|_post|after)", flags=re.IGNORECASE)
+# This includes in-match set/box-score stats that are only known after play.
+_LEAKAGE_PATTERN = re.compile(
+    r"(winner|loser|result|score|outcome|post_|_post|after|stats|setscore|tiebreakscore|"
+    r"breakpoints|returnpointswon|servicepointswon|totalpointswon|aces|doublefaults|sets[_\.\[])",
+    flags=re.IGNORECASE,
+)
 _ANOMALY_SAFE_EXACT = {"anomaly_score", "anomaly_flag", "surface_anomaly_z"}
 _ANOMALY_SAFE_PREFIXES = ("anom_",)
 _ANOMALY_SAFE_TOKENS = ("_anomaly_",)
