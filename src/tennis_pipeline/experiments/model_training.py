@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -26,16 +25,6 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "gbdt_n_estimators": 300,
     "gbdt_learning_rate": 0.05,
 }
-
-
-_LEAKAGE_PATTERN = re.compile(
-    r"(winner|loser|result|score|outcome|post_|_post|after|stats|setscore|tiebreakscore|"
-    r"breakpoints|returnpointswon|servicepointswon|totalpointswon|aces|doublefaults|sets[_\.\[])",
-    flags=re.IGNORECASE,
-)
-_ANOMALY_SAFE_EXACT = {"anomaly_score", "anomaly_flag", "surface_anomaly_z"}
-_ANOMALY_SAFE_PREFIXES = ("anom_",)
-_ANOMALY_SAFE_TOKENS = ("_anomaly_",)
 
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -129,28 +118,6 @@ def _print_leakage_debug_info(x: pd.DataFrame, y: pd.Series, *, target_column: s
         print("[leakage-debug] near-perfect target copies detected: none")
 
 
-def _is_leakage_feature(col: str, target_column: str) -> bool:
-    if col == target_column:
-        return False
-    if col in _ANOMALY_SAFE_EXACT:
-        return False
-    if col.startswith(_ANOMALY_SAFE_PREFIXES):
-        return False
-    if any(token in col for token in _ANOMALY_SAFE_TOKENS):
-        return False
-    return bool(_LEAKAGE_PATTERN.search(col))
-
-
-def _select_training_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> list[str]:
-    id_columns = set(cfg["id_columns"])
-    target_column = str(cfg["target_column"])
-    return [
-        c
-        for c in df.columns
-        if c not in id_columns and c != target_column and not _is_leakage_feature(c, target_column)
-    ]
-
-
 def _temporal_split(df: pd.DataFrame, *, date_column: str, test_size: float, validation_size: float) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     ordered = df.copy(deep=True)
     if date_column in ordered.columns:
@@ -218,7 +185,7 @@ def run_model_training_experiments(
     output_path = Path(output_dir) / cfg["output_subdir"]
     output_path.mkdir(parents=True, exist_ok=True)
 
-    feature_columns = _select_training_feature_columns(df, cfg)
+    feature_columns = [c for c in df.columns if c not in set(cfg["id_columns"]) and c != target_column]
     model_df = df.loc[:, [*feature_columns, target_column]].copy(deep=True)
     model_df = model_df.dropna(subset=[target_column]).reset_index(drop=True)
 
