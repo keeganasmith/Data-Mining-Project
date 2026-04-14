@@ -5,7 +5,7 @@ import pandas as pd
 
 
 class FinalizeModelTableLeakageGuardTests(unittest.TestCase):
-    def test_preserves_prefixed_diff_features_for_downstream_consumers(self) -> None:
+    def test_filters_in_match_set_stats_from_prefixed_diff_features(self) -> None:
         step = importlib.import_module("tennis_pipeline.steps.07_finalize_model_table")
 
         df = pd.DataFrame(
@@ -30,8 +30,8 @@ class FinalizeModelTableLeakageGuardTests(unittest.TestCase):
         self.assertIn("rank_diff", out.columns)
         self.assertIn("diff_sglrollrank", out.columns)
         self.assertIn("elo_diff_team1", out.columns)
-        self.assertIn("diff_sets_0_stats_pointstats_totalpointswon_dividend", out.columns)
-        self.assertIn("diff_sets_0_stats_returnstats_breakpointsconverted_dividend", out.columns)
+        self.assertNotIn("diff_sets_0_stats_pointstats_totalpointswon_dividend", out.columns)
+        self.assertNotIn("diff_sets_0_stats_returnstats_breakpointsconverted_dividend", out.columns)
 
 
 if __name__ == "__main__":

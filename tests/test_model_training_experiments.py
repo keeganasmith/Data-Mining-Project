@@ -7,41 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tennis_pipeline.experiments.model_training import _select_training_feature_columns, run_model_training_experiments
-
-
-class ModelTrainingFeatureSelectionTests(unittest.TestCase):
-    def test_drops_leakage_columns_during_training_selection(self) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "event_id": "e1",
-                    "match_id": "m1",
-                    "match_date": "2024-01-01",
-                    "match_seq": 1,
-                    "team1_player_id": "p1",
-                    "team2_player_id": "p2",
-                    "rank_diff": -5,
-                    "diff_sglrollrank": -5,
-                    "diff_sets_0_stats_pointstats_totalpointswon_dividend": 0.9,
-                    "diff_sets_0_stats_returnstats_breakpointsconverted_dividend": 0.6,
-                    "team1_wins": 1,
-                }
-            ]
-        )
-
-        cols = _select_training_feature_columns(
-            df,
-            {
-                "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
-                "target_column": "team1_wins",
-            },
-        )
-
-        self.assertIn("rank_diff", cols)
-        self.assertIn("diff_sglrollrank", cols)
-        self.assertNotIn("diff_sets_0_stats_pointstats_totalpointswon_dividend", cols)
-        self.assertNotIn("diff_sets_0_stats_returnstats_breakpointsconverted_dividend", cols)
+from tennis_pipeline.experiments.model_training import run_model_training_experiments
 
 
 @unittest.skipUnless(
@@ -94,7 +60,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             self.assertIn("models", manifest)
             self.assertEqual(3, len(manifest["models"]))
 
-    def test_debug_leakage_prints_summary_after_leakage_filtering(self) -> None:
+    def test_debug_leakage_prints_suspicious_and_near_copy_features(self) -> None:
         rows = []
         for i in range(80):
             target = 1 if i % 3 != 0 else 0
@@ -129,7 +95,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
 
         output = stdout.getvalue()
         self.assertIn("[leakage-debug] suspicious feature names:", output)
-        self.assertIn("none", output)
+        self.assertIn("winner_proxy_flag", output)
         self.assertIn("[leakage-debug] near-perfect target copies detected:", output)
 
 

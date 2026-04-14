@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -42,6 +43,18 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "elo_diff_pre",
     ],
 }
+
+# Post-match or target-adjacent columns that can create leakage in training.
+# This includes in-match set/box-score stats that are only known after play.
+_LEAKAGE_PATTERN = re.compile(
+    r"(winner|loser|result|score|outcome|post_|_post|after|stats|setscore|tiebreakscore|"
+    r"breakpoints|returnpointswon|servicepointswon|totalpointswon|aces|doublefaults|sets[_\.\[])",
+    flags=re.IGNORECASE,
+)
+_ANOMALY_SAFE_EXACT = {"anomaly_score", "anomaly_flag", "surface_anomaly_z"}
+_ANOMALY_SAFE_PREFIXES = ("anom_",)
+_ANOMALY_SAFE_TOKENS = ("_anomaly_",)
+
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized = dict(_DEFAULT_CONFIG)
@@ -89,6 +102,18 @@ def _resolve_elo_aliases(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _is_leakage_column(col: str, target_column: str) -> bool:
+    if col == target_column:
+        return False
+    if col in _ANOMALY_SAFE_EXACT:
+        return False
+    if col.startswith(_ANOMALY_SAFE_PREFIXES):
+        return False
+    if any(token in col for token in _ANOMALY_SAFE_TOKENS):
+        return False
+    return bool(_LEAKAGE_PATTERN.search(col))
+
+
 def _select_feature_columns(df: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
     target_column = cfg["target_column"]
     id_columns = set(cfg["id_columns"])
@@ -100,6 +125,7 @@ def _select_feature_columns(df: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
         for c in df.columns
         if c not in id_columns
         and c != target_column
+        and not _is_leakage_column(c, target_column)
         and c not in set(cfg["drop_columns"])
     ]
 
