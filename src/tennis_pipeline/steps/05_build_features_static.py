@@ -22,6 +22,8 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _normalize_suffix(value: str) -> str:
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", value)
     clean = re.sub(r"[^0-9a-zA-Z]+", "_", value).strip("_").lower()
     return clean
 
