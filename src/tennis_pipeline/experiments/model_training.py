@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -371,16 +373,34 @@ def run_feature_set_training_experiment(
     *,
     output_dir: str | Path,
     config: Mapping[str, Any] | None = None,
+    start_run_index: int = 1,
+    total_runs: int | None = None,
 ) -> dict[str, Any]:
     """Train model experiments for each materialized feature set."""
 
     manifests: dict[str, Any] = {}
-    for feature_set_name, feature_set_df in feature_set_tables.items():
+    feature_set_count = len(feature_set_tables)
+    inferred_total_runs = total_runs if total_runs is not None else feature_set_count
+    for offset, (feature_set_name, feature_set_df) in enumerate(feature_set_tables.items()):
+        run_number = start_run_index + offset
+        print(
+            f"[pipeline] running feature-set model-training experiment: {feature_set_name} "
+            f"(run {run_number} / {inferred_total_runs})"
+        )
+        started_at = datetime.now(UTC)
+        start_perf = time.perf_counter()
+        print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
         run_config = dict(config or {})
         run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
         manifests[feature_set_name] = run_model_training_experiments(
             feature_set_df,
             output_dir=output_dir,
             config=run_config,
+        )
+        ended_at = datetime.now(UTC)
+        elapsed_seconds = time.perf_counter() - start_perf
+        print(
+            f"[pipeline] feature-set training end ({feature_set_name}): "
+            f"{ended_at.isoformat()} (elapsed {elapsed_seconds:.2f}s)"
         )
     return manifests
