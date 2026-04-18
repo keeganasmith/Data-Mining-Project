@@ -30,6 +30,7 @@ ELO_DEFAULTS: dict[str, Any] = {
 PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "06_build_features_temporal_elo": ELO_DEFAULTS,
     "experiments": DEFAULT_EXPERIMENT_CONFIG,
+    # Includes optional `profile` (e.g. "fast") for low-cost training diagnostics.
     "model_training": DEFAULT_MODEL_TRAINING_CONFIG,
     "06b_build_features_anomaly_surface": {
         "feature_columns": [

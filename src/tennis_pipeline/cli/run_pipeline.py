@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root))
 from tennis_pipeline.config import PIPELINE_DEFAULTS
 from tennis_pipeline.experiments.feature_sets import materialize_feature_sets
 from tennis_pipeline.experiments.model_training import (
+    MODEL_TRAINING_PROFILES,
     run_feature_set_training_experiment,
     run_model_training_experiments,
 )
@@ -108,6 +109,7 @@ def run_pipeline(
     use_anomaly: bool = False,
     run_feature_set_experiment: bool = False,
     config_path: str | Path | None = None,
+    training_profile: str | None = None,
 ) -> pd.DataFrame:
     """Execute all pipeline stages and persist stage/final artifacts."""
 
@@ -172,6 +174,9 @@ def run_pipeline(
     model_training_config = cfg.get("model_training")
     if isinstance(model_training_config, Mapping):
         baseline_training_config = dict(model_training_config)
+        if training_profile is not None:
+            baseline_training_config["profile"] = training_profile
+            print(f"[pipeline] overriding model training profile via CLI: {training_profile}")
         if run_feature_set_experiment:
             baseline_training_config["debug_leakage"] = True
             print("[pipeline] enabling debug leakage logs for training (feature-set mode)")
@@ -204,6 +209,8 @@ def run_pipeline(
                     f"baseline + {len(feature_set_tables)} feature sets = {expected_total_training_runs}"
                 )
             feature_set_training_config = dict(model_training_config)
+            if training_profile is not None:
+                feature_set_training_config["profile"] = training_profile
             feature_set_training_config["debug_leakage"] = True
             print(f"[pipeline] running model training across {len(feature_set_tables)} feature sets")
             run_feature_set_training_experiment(
@@ -253,6 +260,15 @@ def build_parser() -> argparse.ArgumentParser:
             "raw+anomaly, and raw+elo+anomaly. Implies --use-elo and --use-anomaly."
         ),
     )
+    parser.add_argument(
+        "--training-profile",
+        default=None,
+        choices=sorted(MODEL_TRAINING_PROFILES.keys()),
+        help=(
+            "Optional model-training profile override. Use 'fast' for lower estimator counts "
+            "to run quick diagnostics."
+        ),
+    )
     return parser
 
 
@@ -266,6 +282,7 @@ def main() -> None:
         use_anomaly=bool(args.use_anomaly),
         run_feature_set_experiment=bool(args.run_feature_set_experiment),
         config_path=args.config_path,
+        training_profile=args.training_profile,
     )
 
 
