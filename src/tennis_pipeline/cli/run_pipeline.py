@@ -18,7 +18,10 @@ sys.path.insert(0, str(project_root))
 
 from tennis_pipeline.config import PIPELINE_DEFAULTS
 from tennis_pipeline.experiments.feature_sets import materialize_feature_sets
-from tennis_pipeline.experiments.model_training import run_model_training_experiments
+from tennis_pipeline.experiments.model_training import (
+    run_feature_set_training_experiment,
+    run_model_training_experiments,
+)
 from tennis_pipeline.validation.checks import run_stage_checks
 
 STEP_MODULES: tuple[str, ...] = (
@@ -101,6 +104,7 @@ def run_pipeline(
     *,
     use_elo: bool = False,
     use_anomaly: bool = False,
+    run_feature_set_experiment: bool = False,
     config_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Execute all pipeline stages and persist stage/final artifacts."""
@@ -114,15 +118,18 @@ def run_pipeline(
 
     current: pd.DataFrame | str | Path = Path(input_path)
 
+    effective_use_elo = use_elo or run_feature_set_experiment
+    effective_use_anomaly = use_anomaly or run_feature_set_experiment
+
     for step_name in STEP_MODULES:
-        if step_name == "06_build_features_temporal_elo" and not use_elo:
+        if step_name == "06_build_features_temporal_elo" and not effective_use_elo:
             if not isinstance(current, pd.DataFrame):
                 raise TypeError("Pipeline state must be DataFrame before Elo toggle branch")
             current = _ensure_elo_feature_when_disabled(current)
             run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
             continue
-        if step_name == "06b_build_features_anomaly_surface" and not use_anomaly:
+        if step_name == "06b_build_features_anomaly_surface" and not effective_use_anomaly:
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
@@ -145,12 +152,21 @@ def run_pipeline(
     final_df.to_parquet(final_path, index=False)
 
     experiment_config = cfg.get("experiments")
+    feature_set_tables: dict[str, pd.DataFrame] = {}
     if isinstance(experiment_config, Mapping):
-        materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+        feature_set_tables = materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
 
     model_training_config = cfg.get("model_training")
     if isinstance(model_training_config, Mapping):
         run_model_training_experiments(final_df, output_dir=processed_dir, config=model_training_config)
+        if run_feature_set_experiment:
+            if not feature_set_tables and isinstance(experiment_config, Mapping):
+                feature_set_tables = materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+            run_feature_set_training_experiment(
+                feature_set_tables,
+                output_dir=processed_dir,
+                config=model_training_config,
+            )
 
     return final_df
 
@@ -180,6 +196,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable surface-aware anomaly feature stage (06b_build_features_anomaly_surface)",
     )
+    parser.add_argument(
+        "--run-feature-set-experiment",
+        action="store_true",
+        help=(
+            "Train fixed-hyperparameter models across four feature sets: raw only, raw+elo, "
+            "raw+anomaly, and raw+elo+anomaly. Implies --use-elo and --use-anomaly."
+        ),
+    )
     return parser
 
 
@@ -191,6 +215,7 @@ def main() -> None:
         output_dir=args.output_dir,
         use_elo=bool(args.use_elo),
         use_anomaly=bool(args.use_anomaly),
+        run_feature_set_experiment=bool(args.run_feature_set_experiment),
         config_path=args.config_path,
     )
 
