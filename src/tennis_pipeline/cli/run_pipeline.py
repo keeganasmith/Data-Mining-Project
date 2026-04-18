@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -173,13 +175,34 @@ def run_pipeline(
         if run_feature_set_experiment:
             baseline_training_config["debug_leakage"] = True
             print("[pipeline] enabling debug leakage logs for training (feature-set mode)")
+            expected_total_training_runs = 1 + len(feature_set_tables)
+            print(
+                "[pipeline] expected training runs with --run-feature-set-experiment: "
+                f"baseline + {len(feature_set_tables)} feature sets = {expected_total_training_runs}"
+            )
+        else:
+            expected_total_training_runs = 1
 
-        print("[pipeline] running baseline model-training experiment")
+        print(f"[pipeline] running baseline model-training experiment (run 1 / {expected_total_training_runs})")
+        baseline_started_at = datetime.now(UTC)
+        baseline_start_perf = time.perf_counter()
+        print(f"[pipeline] baseline training start: {baseline_started_at.isoformat()}")
         run_model_training_experiments(final_df, output_dir=processed_dir, config=baseline_training_config)
+        baseline_ended_at = datetime.now(UTC)
+        baseline_elapsed_seconds = time.perf_counter() - baseline_start_perf
+        print(
+            "[pipeline] baseline training end: "
+            f"{baseline_ended_at.isoformat()} (elapsed {baseline_elapsed_seconds:.2f}s)"
+        )
         if run_feature_set_experiment:
             if not feature_set_tables and isinstance(experiment_config, Mapping):
                 print("[pipeline] feature sets missing; rematerializing before training")
                 feature_set_tables = materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+                expected_total_training_runs = 1 + len(feature_set_tables)
+                print(
+                    "[pipeline] updated expected training runs: "
+                    f"baseline + {len(feature_set_tables)} feature sets = {expected_total_training_runs}"
+                )
             feature_set_training_config = dict(model_training_config)
             feature_set_training_config["debug_leakage"] = True
             print(f"[pipeline] running model training across {len(feature_set_tables)} feature sets")
@@ -187,6 +210,8 @@ def run_pipeline(
                 feature_set_tables,
                 output_dir=processed_dir,
                 config=feature_set_training_config,
+                start_run_index=2,
+                total_runs=expected_total_training_runs,
             )
             print("[pipeline] feature-set training experiment complete")
 
