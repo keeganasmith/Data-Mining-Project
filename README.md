@@ -43,7 +43,8 @@ python -m tennis_pipeline.cli.run_pipeline \
   --output-dir <output-root> \
   [--config-path <json-or-yaml-config>] \
   [--use-elo] \
-  [--use-anomaly]
+  [--use-anomaly] \
+  [--run-feature-set-experiment]
 ```
 
 ### Required argument
@@ -75,6 +76,14 @@ python -m tennis_pipeline.cli.run_pipeline \
 - `--use-anomaly` (flag)
   - Enables step `06b_build_features_anomaly_surface`.
   - If omitted, anomaly feature generation and anomaly artifact files are skipped.
+
+- `--run-feature-set-experiment` (flag)
+  - Runs fixed-hyperparameter training across these four feature-set variants:
+    - raw only
+    - raw + elo
+    - raw + anomaly
+    - raw + elo + anomaly
+  - This flag implies both `--use-elo` and `--use-anomaly`.
 
 ---
 
@@ -302,11 +311,11 @@ By default (`model_training.enabled: true`), the pipeline now trains:
 - Random Forest
 - Gradient Boosted Decision Trees (GBDT)
 
-For each model, it sweeps `max_depth` values and writes:
+For each model, it trains with fixed defaults (no depth/hyperparameter sweep) and writes:
 
 - `depth_accuracy_curves.csv` (training and validation accuracy by depth)
 - `depth_accuracy_curves.png` (training vs validation accuracy curves)
-- `model_summary_metrics.csv` (best depth, test accuracy, test ROC-AUC)
+- `model_summary_metrics.csv` (test accuracy, test ROC-AUC, and fixed-depth metadata)
 - `roc_curve__decision_tree.png`
 - `roc_curve__random_forest.png`
 - `roc_curve__gbdt.png`
@@ -316,16 +325,20 @@ All artifacts are written under:
 
 - `<output-dir>/processed/model_training/`
 
-### Example: customize depth sweep
+### Example: configure fixed training hyperparameters
 
 ```json
 {
   "model_training": {
     "enabled": true,
-    "depth_values": [1, 2, 3, 4, 5, 6, 8, 10],
+    "depth_values": [8],
     "rf_n_estimators": 300,
+    "dt_min_samples_leaf": 25,
+    "rf_min_samples_leaf": 15,
     "gbdt_n_estimators": 300,
-    "gbdt_learning_rate": 0.05
+    "gbdt_learning_rate": 0.05,
+    "gbdt_min_samples_leaf": 20,
+    "gbdt_subsample": 0.8
   }
 }
 ```

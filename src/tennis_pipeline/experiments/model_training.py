@@ -16,7 +16,8 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "date_column": "match_date",
-    "depth_values": [1, 2, 3, 4, 5, 6, 8, 10, 12],
+    # Keep a single fixed depth by default (no depth sweep).
+    "depth_values": [8],
     "test_size": 0.2,
     "validation_size": 0.2,
     "output_subdir": "model_training",
@@ -24,6 +25,10 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "rf_n_estimators": 300,
     "gbdt_n_estimators": 300,
     "gbdt_learning_rate": 0.05,
+    "dt_min_samples_leaf": 25,
+    "rf_min_samples_leaf": 15,
+    "gbdt_min_samples_leaf": 20,
+    "gbdt_subsample": 0.8,
 }
 
 
@@ -61,10 +66,18 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if cfg["test_size"] + cfg["validation_size"] >= 0.8:
         raise ValueError("test_size + validation_size must be < 0.8")
 
-    for key in ("random_state", "rf_n_estimators", "gbdt_n_estimators"):
+    for key in (
+        "random_state",
+        "rf_n_estimators",
+        "gbdt_n_estimators",
+        "dt_min_samples_leaf",
+        "rf_min_samples_leaf",
+        "gbdt_min_samples_leaf",
+    ):
         cfg[key] = int(cfg[key])
 
     cfg["gbdt_learning_rate"] = float(cfg["gbdt_learning_rate"])
+    cfg["gbdt_subsample"] = float(cfg["gbdt_subsample"])
     return cfg
 
 
@@ -227,10 +240,15 @@ def run_model_training_experiments(
     )
 
     model_specs = {
-        "decision_tree": lambda depth: DecisionTreeClassifier(max_depth=depth, random_state=cfg["random_state"]),
+        "decision_tree": lambda depth: DecisionTreeClassifier(
+            max_depth=depth,
+            min_samples_leaf=cfg["dt_min_samples_leaf"],
+            random_state=cfg["random_state"],
+        ),
         "random_forest": lambda depth: RandomForestClassifier(
             n_estimators=cfg["rf_n_estimators"],
             max_depth=depth,
+            min_samples_leaf=cfg["rf_min_samples_leaf"],
             random_state=cfg["random_state"],
             n_jobs=-1,
         ),
@@ -238,6 +256,8 @@ def run_model_training_experiments(
             n_estimators=cfg["gbdt_n_estimators"],
             learning_rate=cfg["gbdt_learning_rate"],
             max_depth=depth,
+            min_samples_leaf=cfg["gbdt_min_samples_leaf"],
+            subsample=cfg["gbdt_subsample"],
             random_state=cfg["random_state"],
         ),
     }
@@ -344,3 +364,23 @@ def run_model_training_experiments(
     plt.close()
 
     return manifest
+
+
+def run_feature_set_training_experiment(
+    feature_set_tables: Mapping[str, pd.DataFrame],
+    *,
+    output_dir: str | Path,
+    config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Train model experiments for each materialized feature set."""
+
+    manifests: dict[str, Any] = {}
+    for feature_set_name, feature_set_df in feature_set_tables.items():
+        run_config = dict(config or {})
+        run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
+        manifests[feature_set_name] = run_model_training_experiments(
+            feature_set_df,
+            output_dir=output_dir,
+            config=run_config,
+        )
+    return manifests
