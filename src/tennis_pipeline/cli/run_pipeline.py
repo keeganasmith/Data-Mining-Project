@@ -109,6 +109,10 @@ def run_pipeline(
 ) -> pd.DataFrame:
     """Execute all pipeline stages and persist stage/final artifacts."""
 
+    print("[pipeline] starting tennis pipeline run")
+    if run_feature_set_experiment:
+        print("[pipeline] --run-feature-set-experiment enabled (implies Elo + anomaly stages)")
+
     cfg = _load_config(config_path)
     out_root = Path(output_dir)
     interim_dir = out_root / "interim"
@@ -122,14 +126,17 @@ def run_pipeline(
     effective_use_anomaly = use_anomaly or run_feature_set_experiment
 
     for step_name in STEP_MODULES:
+        print(f"[pipeline] step {step_name}: start")
         if step_name == "06_build_features_temporal_elo" and not effective_use_elo:
             if not isinstance(current, pd.DataFrame):
                 raise TypeError("Pipeline state must be DataFrame before Elo toggle branch")
             current = _ensure_elo_feature_when_disabled(current)
             run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+            print(f"[pipeline] step {step_name}: skipped (Elo disabled); wrote defaults")
             continue
         if step_name == "06b_build_features_anomaly_surface" and not effective_use_anomaly:
+            print(f"[pipeline] step {step_name}: skipped (anomaly disabled)")
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
@@ -143,6 +150,7 @@ def run_pipeline(
 
         run_stage_checks(current, step_name)
         current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+        print(f"[pipeline] step {step_name}: complete ({len(current):,} rows, {len(current.columns):,} columns)")
 
     final_df = current
     if not isinstance(final_df, pd.DataFrame):
@@ -150,23 +158,39 @@ def run_pipeline(
 
     final_path = processed_dir / "model_table.parquet"
     final_df.to_parquet(final_path, index=False)
+    print(f"[pipeline] final model table written: {final_path}")
 
     experiment_config = cfg.get("experiments")
     feature_set_tables: dict[str, pd.DataFrame] = {}
     if isinstance(experiment_config, Mapping):
+        print("[pipeline] materializing experiment feature-set tables")
         feature_set_tables = materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+        print(f"[pipeline] materialized {len(feature_set_tables)} feature-set tables")
 
     model_training_config = cfg.get("model_training")
     if isinstance(model_training_config, Mapping):
-        run_model_training_experiments(final_df, output_dir=processed_dir, config=model_training_config)
+        baseline_training_config = dict(model_training_config)
+        if run_feature_set_experiment:
+            baseline_training_config["debug_leakage"] = True
+            print("[pipeline] enabling debug leakage logs for training (feature-set mode)")
+
+        print("[pipeline] running baseline model-training experiment")
+        run_model_training_experiments(final_df, output_dir=processed_dir, config=baseline_training_config)
         if run_feature_set_experiment:
             if not feature_set_tables and isinstance(experiment_config, Mapping):
+                print("[pipeline] feature sets missing; rematerializing before training")
                 feature_set_tables = materialize_feature_sets(final_df, output_dir=processed_dir, config=experiment_config)
+            feature_set_training_config = dict(model_training_config)
+            feature_set_training_config["debug_leakage"] = True
+            print(f"[pipeline] running model training across {len(feature_set_tables)} feature sets")
             run_feature_set_training_experiment(
                 feature_set_tables,
                 output_dir=processed_dir,
-                config=model_training_config,
+                config=feature_set_training_config,
             )
+            print("[pipeline] feature-set training experiment complete")
+
+    print("[pipeline] pipeline run complete")
 
     return final_df
 
