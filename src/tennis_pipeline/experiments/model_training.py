@@ -16,6 +16,7 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "enabled": True,
     "profile": "default",
     "debug_leakage": False,
+    "verbose_training": False,
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "date_column": "match_date",
@@ -58,6 +59,8 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         raise TypeError("model_training config['enabled'] must be a bool")
     if not isinstance(cfg.get("debug_leakage"), bool):
         raise TypeError("model_training config['debug_leakage'] must be a bool")
+    if not isinstance(cfg.get("verbose_training"), bool):
+        raise TypeError("model_training config['verbose_training'] must be a bool")
 
     for key in ("target_column", "output_subdir", "date_column", "profile"):
         value = cfg.get(key)
@@ -256,6 +259,30 @@ def run_model_training_experiments(
         ]
     )
 
+    def _training_log(message: str) -> None:
+        if cfg["verbose_training"]:
+            print(f"[model-training] {message}")
+
+    model_hyperparams = {
+        "decision_tree": {
+            "min_samples_leaf": cfg["dt_min_samples_leaf"],
+            "random_state": cfg["random_state"],
+        },
+        "random_forest": {
+            "n_estimators": cfg["rf_n_estimators"],
+            "min_samples_leaf": cfg["rf_min_samples_leaf"],
+            "random_state": cfg["random_state"],
+            "n_jobs": -1,
+        },
+        "gbdt": {
+            "n_estimators": cfg["gbdt_n_estimators"],
+            "learning_rate": cfg["gbdt_learning_rate"],
+            "min_samples_leaf": cfg["gbdt_min_samples_leaf"],
+            "subsample": cfg["gbdt_subsample"],
+            "random_state": cfg["random_state"],
+        },
+    }
+
     model_specs = {
         "decision_tree": lambda depth: DecisionTreeClassifier(
             max_depth=depth,
@@ -284,14 +311,22 @@ def run_model_training_experiments(
 
     plt.figure(figsize=(12, 8))
     for idx, (model_name, factory) in enumerate(model_specs.items(), start=1):
+        _training_log(
+            f"start model={model_name} hyperparams={model_hyperparams[model_name]} "
+            f"depth_values={cfg['depth_values']}"
+        )
         curves: list[dict[str, float]] = []
         best_val_accuracy = -1.0
         best_depth = cfg["depth_values"][0]
         best_pipeline = None
 
         for depth in cfg["depth_values"]:
+            _training_log(f"fit start model={model_name} depth={depth}")
+            fit_started = time.perf_counter()
             pipeline = Pipeline(steps=[("prep", preprocessor), ("model", factory(depth))])
             pipeline.fit(x_train, y_train)
+            fit_elapsed = time.perf_counter() - fit_started
+            _training_log(f"fit end model={model_name} depth={depth} elapsed_sec={fit_elapsed:.2f}")
             train_acc = float(accuracy_score(y_train, pipeline.predict(x_train)))
             val_acc = float(accuracy_score(y_val, pipeline.predict(x_val)))
             curves.append(
@@ -330,6 +365,10 @@ def run_model_training_experiments(
                 "test_accuracy": test_accuracy,
                 "test_roc_auc": test_roc_auc,
             }
+        )
+        _training_log(
+            f"done model={model_name} best_depth={best_depth} "
+            f"val_acc={val_accuracy_at_best:.4f} test_acc={test_accuracy:.4f} test_auc={test_roc_auc:.4f}"
         )
 
         plt.subplot(2, 2, idx)
