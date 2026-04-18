@@ -14,6 +14,7 @@ import pandas as pd
 
 DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "enabled": True,
+    "profile": "default",
     "debug_leakage": False,
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
@@ -33,18 +34,32 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "gbdt_subsample": 0.8,
 }
 
+MODEL_TRAINING_PROFILES: dict[str, dict[str, Any]] = {
+    "default": {},
+    "fast": {
+        "rf_n_estimators": 50,
+        "gbdt_n_estimators": 50,
+    },
+}
+
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw_config = dict(config or {})
     cfg = dict(DEFAULT_MODEL_TRAINING_CONFIG)
-    if config:
-        cfg.update(dict(config))
+    profile = str(raw_config.get("profile", cfg["profile"])).strip().lower()
+    if profile not in MODEL_TRAINING_PROFILES:
+        allowed = ", ".join(sorted(MODEL_TRAINING_PROFILES))
+        raise ValueError(f"model_training config['profile'] must be one of: {allowed}")
+    cfg.update(MODEL_TRAINING_PROFILES[profile])
+    cfg.update(raw_config)
+    cfg["profile"] = profile
 
     if not isinstance(cfg.get("enabled"), bool):
         raise TypeError("model_training config['enabled'] must be a bool")
     if not isinstance(cfg.get("debug_leakage"), bool):
         raise TypeError("model_training config['debug_leakage'] must be a bool")
 
-    for key in ("target_column", "output_subdir", "date_column"):
+    for key in ("target_column", "output_subdir", "date_column", "profile"):
         value = cfg.get(key)
         if not isinstance(value, str) or not value.strip():
             raise TypeError(f"model_training config['{key}'] must be a non-empty string")
@@ -344,6 +359,20 @@ def run_model_training_experiments(
     )
 
     manifest = {
+        "configuration": {
+            "profile": cfg["profile"],
+            "random_state": cfg["random_state"],
+            "depth_values": [int(depth) for depth in cfg["depth_values"]],
+            "rf_n_estimators": cfg["rf_n_estimators"],
+            "gbdt_n_estimators": cfg["gbdt_n_estimators"],
+            "gbdt_learning_rate": cfg["gbdt_learning_rate"],
+            "dt_min_samples_leaf": cfg["dt_min_samples_leaf"],
+            "rf_min_samples_leaf": cfg["rf_min_samples_leaf"],
+            "gbdt_min_samples_leaf": cfg["gbdt_min_samples_leaf"],
+            "gbdt_subsample": cfg["gbdt_subsample"],
+            "test_size": cfg["test_size"],
+            "validation_size": cfg["validation_size"],
+        },
         "split": {
             "train_rows": int(len(train_df)),
             "validation_rows": int(len(val_df)),
