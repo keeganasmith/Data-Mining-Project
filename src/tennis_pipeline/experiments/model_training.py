@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import timezone, datetime
 from pathlib import Path
 from typing import Any
 
@@ -464,7 +464,7 @@ def run_feature_set_training_experiment(
             f"[pipeline] running feature-set model-training experiment: {feature_set_name} "
             f"(run {run_number} / {inferred_total_runs})"
         )
-        started_at = datetime.now(UTC)
+        started_at = datetime.now(timezone.utc)
         start_perf = time.perf_counter()
         print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
         run_config = dict(config or {})
@@ -486,7 +486,7 @@ def run_feature_set_training_experiment(
                         "test_accuracy": float(test_accuracy),
                     }
                 )
-        ended_at = datetime.now(UTC)
+        ended_at = datetime.now(timezone.utc)
         elapsed_seconds = time.perf_counter() - start_perf
         print(
             f"[pipeline] feature-set training end ({feature_set_name}): "

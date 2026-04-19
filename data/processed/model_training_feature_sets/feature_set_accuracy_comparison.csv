@@ -1,0 +1,13 @@
+feature_set,model,test_accuracy
+structured_only,decision_tree,0.6279991314732385
+structured_plus_anomaly,decision_tree,0.6246335902725003
+structured_plus_anomaly_plus_elo,decision_tree,0.6403213549017479
+structured_plus_elo,decision_tree,0.6398870915210075
+structured_only,gbdt,0.6236564976658343
+structured_plus_anomaly,gbdt,0.6279448485506459
+structured_plus_anomaly_plus_elo,gbdt,0.6391814135273043
+structured_plus_elo,gbdt,0.6364672673976767
+structured_only,random_forest,0.6328845945065682
+structured_plus_anomaly,random_forest,0.6330474432743459
+structured_plus_anomaly_plus_elo,random_forest,0.6458582130061883
+structured_plus_elo,random_forest,0.647106720225817

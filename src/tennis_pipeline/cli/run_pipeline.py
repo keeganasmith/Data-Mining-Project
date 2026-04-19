@@ -7,7 +7,7 @@ import importlib
 import json
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import timezone, datetime
 from pathlib import Path
 from typing import Any
 
@@ -189,11 +189,11 @@ def run_pipeline(
             expected_total_training_runs = 1
 
         print(f"[pipeline] running baseline model-training experiment (run 1 / {expected_total_training_runs})")
-        baseline_started_at = datetime.now(UTC)
+        baseline_started_at = datetime.now(timezone.utc)
         baseline_start_perf = time.perf_counter()
         print(f"[pipeline] baseline training start: {baseline_started_at.isoformat()}")
         run_model_training_experiments(final_df, output_dir=processed_dir, config=baseline_training_config)
-        baseline_ended_at = datetime.now(UTC)
+        baseline_ended_at = datetime.now(timezone.utc)
         baseline_elapsed_seconds = time.perf_counter() - baseline_start_perf
         print(
             "[pipeline] baseline training end: "

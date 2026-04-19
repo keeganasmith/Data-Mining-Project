@@ -1,7 +1,7 @@
 {
   "row_count": 92112,
-  "anomaly_flag_count": 4627,
-  "anomaly_flag_rate": 0.050232325864165366,
+  "anomaly_flag_count": 4700,
+  "anomaly_flag_rate": 0.051024839326037866,
   "score_columns": [
     "anomaly_score",
     "robust_z_anomaly_score",

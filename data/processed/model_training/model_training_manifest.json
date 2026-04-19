@@ -1,0 +1,61 @@
+{
+  "configuration": {
+    "profile": "default",
+    "random_state": 42,
+    "depth_values": [
+      8
+    ],
+    "rf_n_estimators": 300,
+    "gbdt_n_estimators": 300,
+    "gbdt_learning_rate": 0.05,
+    "dt_min_samples_leaf": 25,
+    "rf_min_samples_leaf": 15,
+    "gbdt_min_samples_leaf": 20,
+    "gbdt_subsample": 0.8,
+    "test_size": 0.2,
+    "validation_size": 0.2
+  },
+  "split": {
+    "train_rows": 55268,
+    "validation_rows": 18422,
+    "test_rows": 18422,
+    "target_column": "team1_wins",
+    "feature_count": 52
+  },
+  "models": [
+    {
+      "model": "decision_tree",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.6839400738221032,
+      "validation_accuracy_at_best_depth": 0.647703832374335,
+      "test_accuracy": 0.6403756378243405,
+      "test_roc_auc": 0.6944884601883976
+    },
+    {
+      "model": "random_forest",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.6902004776724325,
+      "validation_accuracy_at_best_depth": 0.652317880794702,
+      "test_accuracy": 0.6460753446965585,
+      "test_roc_auc": 0.706378038955125
+    },
+    {
+      "model": "gbdt",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.8048418614749946,
+      "validation_accuracy_at_best_depth": 0.6494408858972968,
+      "test_accuracy": 0.6409727499728586,
+      "test_roc_auc": 0.6965662289659807
+    }
+  ],
+  "artifacts": {
+    "depth_curve_csv": "data/processed/model_training/depth_accuracy_curves.csv",
+    "summary_csv": "data/processed/model_training/model_summary_metrics.csv",
+    "depth_accuracy_plot": "data/processed/model_training/depth_accuracy_curves.png",
+    "roc_curve_plots": [
+      "data/processed/model_training/roc_curve__decision_tree.png",
+      "data/processed/model_training/roc_curve__random_forest.png",
+      "data/processed/model_training/roc_curve__gbdt.png"
+    ]
+  }
+}
