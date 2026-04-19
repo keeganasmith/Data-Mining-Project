@@ -446,7 +446,16 @@ def run_feature_set_training_experiment(
 ) -> dict[str, Any]:
     """Train model experiments for each materialized feature set."""
 
+    try:
+        import matplotlib
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("feature-set training plots require optional dependency: matplotlib") from exc
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     manifests: dict[str, Any] = {}
+    run_summary_rows: list[dict[str, Any]] = []
     feature_set_count = len(feature_set_tables)
     inferred_total_runs = total_runs if total_runs is not None else feature_set_count
     for offset, (feature_set_name, feature_set_df) in enumerate(feature_set_tables.items()):
@@ -460,15 +469,77 @@ def run_feature_set_training_experiment(
         print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
         run_config = dict(config or {})
         run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
-        manifests[feature_set_name] = run_model_training_experiments(
+        run_manifest = run_model_training_experiments(
             feature_set_df,
             output_dir=output_dir,
             config=run_config,
         )
+        manifests[feature_set_name] = run_manifest
+        for model_metrics in run_manifest.get("models", []):
+            model_name = model_metrics.get("model")
+            test_accuracy = model_metrics.get("test_accuracy")
+            if isinstance(model_name, str) and isinstance(test_accuracy, (int, float)):
+                run_summary_rows.append(
+                    {
+                        "feature_set": feature_set_name,
+                        "model": model_name,
+                        "test_accuracy": float(test_accuracy),
+                    }
+                )
         ended_at = datetime.now(UTC)
         elapsed_seconds = time.perf_counter() - start_perf
         print(
             f"[pipeline] feature-set training end ({feature_set_name}): "
             f"{ended_at.isoformat()} (elapsed {elapsed_seconds:.2f}s)"
         )
+
+    summary_dir = Path(output_dir) / "model_training_feature_sets"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+
+    if run_summary_rows:
+        summary_df = pd.DataFrame(run_summary_rows).sort_values(
+            by=["model", "feature_set"],
+            kind="stable",
+        )
+        summary_csv = summary_dir / "feature_set_accuracy_comparison.csv"
+        summary_df.to_csv(summary_csv, index=False)
+
+        plotted_models = list(summary_df["model"].drop_duplicates())
+        feature_sets = list(summary_df["feature_set"].drop_duplicates())
+        x = np.arange(len(feature_sets))
+        bar_width = 0.8 / max(1, len(plotted_models))
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        for idx, model_name in enumerate(plotted_models):
+            model_slice = (
+                summary_df[summary_df["model"] == model_name]
+                .set_index("feature_set")
+                .reindex(feature_sets)
+            )
+            y_vals = model_slice["test_accuracy"].fillna(0.0).to_numpy()
+            ax.bar(
+                x + (idx - (len(plotted_models) - 1) / 2.0) * bar_width,
+                y_vals,
+                width=bar_width,
+                label=model_name,
+            )
+
+        ax.set_title("Feature-set experiment: test accuracy comparison")
+        ax.set_xlabel("feature set")
+        ax.set_ylabel("test accuracy")
+        ax.set_ylim(0.0, 1.0)
+        ax.set_xticks(x)
+        ax.set_xticklabels(feature_sets, rotation=20, ha="right")
+        ax.grid(axis="y", alpha=0.3)
+        ax.legend(title="model")
+        fig.tight_layout()
+
+        comparison_plot = summary_dir / "feature_set_accuracy_comparison.png"
+        fig.savefig(comparison_plot, bbox_inches="tight")
+        plt.close(fig)
+
+        for feature_set_name, run_manifest in manifests.items():
+            artifacts = run_manifest.setdefault("artifacts", {})
+            artifacts["feature_set_accuracy_comparison_csv"] = str(summary_csv)
+            artifacts["feature_set_accuracy_comparison_plot"] = str(comparison_plot)
     return manifests
