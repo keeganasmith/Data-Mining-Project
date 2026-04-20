@@ -199,7 +199,7 @@ def run_model_training_experiments(
         from sklearn.compose import ColumnTransformer
         from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
         from sklearn.impute import SimpleImputer
-        from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve
+        from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score, roc_curve
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import OneHotEncoder
         from sklearn.tree import DecisionTreeClassifier
@@ -306,8 +306,53 @@ def run_model_training_experiments(
         ),
     }
 
+    def _calibration_table(
+        y_true: pd.Series,
+        y_proba: np.ndarray,
+        *,
+        bins: int = 10,
+    ) -> tuple[pd.DataFrame, float]:
+        clipped_proba = np.clip(y_proba, 1e-15, 1.0 - 1e-15)
+        bin_edges = np.linspace(0.0, 1.0, bins + 1)
+        bin_ids = np.digitize(clipped_proba, bin_edges[1:-1], right=False)
+
+        rows: list[dict[str, float | int]] = []
+        total_count = max(1, int(len(clipped_proba)))
+        ece = 0.0
+        for bin_idx in range(bins):
+            mask = bin_ids == bin_idx
+            sample_count = int(mask.sum())
+            if sample_count == 0:
+                positive_rate = np.nan
+                mean_predicted_prob = np.nan
+                abs_calibration_error = np.nan
+                weighted_abs_calibration_error = 0.0
+            else:
+                y_slice = y_true[mask]
+                p_slice = clipped_proba[mask]
+                positive_rate = float(np.mean(y_slice))
+                mean_predicted_prob = float(np.mean(p_slice))
+                abs_calibration_error = float(abs(positive_rate - mean_predicted_prob))
+                weighted_abs_calibration_error = abs_calibration_error * (sample_count / total_count)
+            ece += weighted_abs_calibration_error
+            rows.append(
+                {
+                    "bin_index": int(bin_idx),
+                    "bin_lower": float(bin_edges[bin_idx]),
+                    "bin_upper": float(bin_edges[bin_idx + 1]),
+                    "sample_count": sample_count,
+                    "mean_predicted_probability": mean_predicted_prob,
+                    "observed_positive_rate": positive_rate,
+                    "absolute_calibration_error": abs_calibration_error,
+                    "weighted_absolute_calibration_error": float(weighted_abs_calibration_error),
+                }
+            )
+
+        return pd.DataFrame(rows), float(ece)
+
     curve_rows: list[dict[str, float]] = []
     summary_rows: list[dict[str, Any]] = []
+    calibration_rows: list[dict[str, Any]] = []
 
     plt.figure(figsize=(12, 8))
     for idx, (model_name, factory) in enumerate(model_specs.items(), start=1):
@@ -348,9 +393,22 @@ def run_model_training_experiments(
         curve_rows.extend(curves)
         test_pred = best_pipeline.predict(x_test)
         test_proba = best_pipeline.predict_proba(x_test)[:, 1]
+        clipped_test_proba = np.clip(test_proba, 1e-15, 1.0 - 1e-15)
 
         test_accuracy = float(accuracy_score(y_test, test_pred))
         test_roc_auc = float(roc_auc_score(y_test, test_proba))
+        test_log_loss = float(log_loss(y_test, clipped_test_proba, labels=[0, 1]))
+        test_brier_score = float(brier_score_loss(y_test, clipped_test_proba))
+        calibration_table_df, test_ece_10_bins = _calibration_table(y_test.reset_index(drop=True), clipped_test_proba, bins=10)
+        calibration_rows.extend(
+            [
+                {
+                    "model": model_name,
+                    **row,
+                }
+                for row in calibration_table_df.to_dict(orient="records")
+            ]
+        )
         fpr, tpr, _ = roc_curve(y_test, test_proba)
 
         train_accuracy_at_best = next(r["train_accuracy"] for r in curves if r["depth"] == best_depth)
@@ -364,11 +422,16 @@ def run_model_training_experiments(
                 "validation_accuracy_at_best_depth": val_accuracy_at_best,
                 "test_accuracy": test_accuracy,
                 "test_roc_auc": test_roc_auc,
+                "test_log_loss": test_log_loss,
+                "test_brier_score": test_brier_score,
+                "test_ece_10_bins": test_ece_10_bins,
             }
         )
         _training_log(
             f"done model={model_name} best_depth={best_depth} "
-            f"val_acc={val_accuracy_at_best:.4f} test_acc={test_accuracy:.4f} test_auc={test_roc_auc:.4f}"
+            f"val_acc={val_accuracy_at_best:.4f} test_acc={test_accuracy:.4f} "
+            f"test_auc={test_roc_auc:.4f} test_log_loss={test_log_loss:.4f} "
+            f"test_brier={test_brier_score:.4f} test_ece10={test_ece_10_bins:.4f}"
         )
 
         plt.subplot(2, 2, idx)
@@ -395,6 +458,9 @@ def run_model_training_experiments(
     pd.DataFrame(curve_rows).to_csv(output_path / "depth_accuracy_curves.csv", index=False)
     pd.DataFrame(summary_rows).sort_values(by="model", kind="stable").to_csv(
         output_path / "model_summary_metrics.csv", index=False
+    )
+    pd.DataFrame(calibration_rows).sort_values(by=["model", "bin_index"], kind="stable").to_csv(
+        output_path / "model_calibration_table.csv", index=False
     )
 
     manifest = {
@@ -423,6 +489,7 @@ def run_model_training_experiments(
         "artifacts": {
             "depth_curve_csv": str(output_path / "depth_accuracy_curves.csv"),
             "summary_csv": str(output_path / "model_summary_metrics.csv"),
+            "calibration_table_csv": str(output_path / "model_calibration_table.csv"),
             "depth_accuracy_plot": str(output_path / "depth_accuracy_curves.png"),
             "roc_curve_plots": [str(output_path / f"roc_curve__{name}.png") for name in model_specs],
         },
@@ -484,6 +551,10 @@ def run_feature_set_training_experiment(
                         "feature_set": feature_set_name,
                         "model": model_name,
                         "test_accuracy": float(test_accuracy),
+                        "test_roc_auc": float(model_metrics.get("test_roc_auc", np.nan)),
+                        "test_log_loss": float(model_metrics.get("test_log_loss", np.nan)),
+                        "test_brier_score": float(model_metrics.get("test_brier_score", np.nan)),
+                        "test_ece_10_bins": float(model_metrics.get("test_ece_10_bins", np.nan)),
                     }
                 )
         ended_at = datetime.now(timezone.utc)
