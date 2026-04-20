@@ -38,7 +38,7 @@ _PARALLEL_BACKENDS = {"loky", "threading"}
 _TUNING_PROFILES = {"fast", "full"}
 
 
-def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+def _normalize_config(config: Mapping[str, Any] | None, *, row_count: int | None = None) -> dict[str, Any]:
     normalized = dict(CLUSTERING_DEFAULTS)
     if config:
         normalized.update(dict(config))
@@ -66,6 +66,28 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     auto_tune = normalized.get("auto_tune")
     if not isinstance(auto_tune, bool):
         raise TypeError("config['auto_tune'] must be a bool")
+
+    auto_tune_train_only_max_rows = normalized.get("auto_tune_train_only_max_rows")
+    if not isinstance(auto_tune_train_only_max_rows, int):
+        raise TypeError("config['auto_tune_train_only_max_rows'] must be an int")
+    if auto_tune_train_only_max_rows < 1:
+        raise ValueError("config['auto_tune_train_only_max_rows'] must be >= 1")
+
+    allow_auto_tune_all_data_override = normalized.get("allow_auto_tune_all_data_override")
+    if not isinstance(allow_auto_tune_all_data_override, bool):
+        raise TypeError("config['allow_auto_tune_all_data_override'] must be a bool")
+
+    if (
+        row_count is not None
+        and bool(auto_tune)
+        and int(row_count) > int(auto_tune_train_only_max_rows)
+        and fit_scope == "all_data"
+        and not bool(allow_auto_tune_all_data_override)
+    ):
+        raise ValueError(
+            "config safeguard: auto_tune with row_count above auto_tune_train_only_max_rows "
+            "requires fit_scope='train_only' unless allow_auto_tune_all_data_override=True"
+        )
 
     tuning_profile = normalized.get("tuning_profile")
     if tuning_profile not in _TUNING_PROFILES:
@@ -573,8 +595,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     if not isinstance(df_or_path, pd.DataFrame):
         raise TypeError("06c_build_features_clustering.run expects a pandas DataFrame input")
 
-    cfg = _normalize_config(config)
     out = df_or_path.copy(deep=True)
+    cfg = _normalize_config(config, row_count=len(out))
     tuning_profile = _resolve_tuning_profile(cfg, row_count=len(out), user_config=config)
     tuned_cfg = _apply_tuning_profile(cfg, tuning_profile)
 
