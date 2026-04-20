@@ -55,13 +55,24 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "train_fraction": 0.8,
     # Leakage policy: "train_only" fits on earliest training slice only; "all_data" fits on full table (not leakage-safe).
     "fit_scope": "train_only",
+    # Auto-tune clustering hyperparameters to maximize silhouette score.
+    "auto_tune": True,
+    # Optional artifact path used to cache best hyperparameters and tuning results.
+    "tuning_artifact_path": "data/processed/clustering_tuning_artifact.json",
+    # Optional output directory for tuning summary plots.
+    "tuning_plot_dir": "data/processed",
     # KMeans knobs.
     "kmeans_n_clusters": 8,
     "kmeans_random_state": 42,
     "kmeans_n_init": 10,
+    # KMeans tuning search space.
+    "kmeans_tuning_n_clusters": [2, 3, 4, 5, 6, 7, 8, 9, 10],
     # DBSCAN knobs.
     "dbscan_eps": 0.9,
     "dbscan_min_samples": 25,
+    # DBSCAN tuning search space.
+    "dbscan_tuning_eps": [0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5],
+    "dbscan_tuning_min_samples": [5, 10, 15, 20, 25, 30],
 }
 
 

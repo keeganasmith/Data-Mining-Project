@@ -15,12 +15,15 @@ Notes on leakage:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN, KMeans
+from sklearn.metrics import silhouette_score
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
@@ -55,6 +58,36 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     fit_scope = normalized.get("fit_scope")
     if fit_scope not in _FIT_SCOPES:
         raise ValueError(f"config['fit_scope'] must be one of {_FIT_SCOPES}; got {fit_scope!r}")
+
+    auto_tune = normalized.get("auto_tune")
+    if not isinstance(auto_tune, bool):
+        raise TypeError("config['auto_tune'] must be a bool")
+
+    artifact_path = normalized.get("tuning_artifact_path")
+    if not isinstance(artifact_path, str) or not artifact_path.strip():
+        raise TypeError("config['tuning_artifact_path'] must be a non-empty string path")
+
+    plot_dir = normalized.get("tuning_plot_dir")
+    if not isinstance(plot_dir, str) or not plot_dir.strip():
+        raise TypeError("config['tuning_plot_dir'] must be a non-empty string path")
+
+    kmeans_grid = normalized.get("kmeans_tuning_n_clusters")
+    if not isinstance(kmeans_grid, list) or not kmeans_grid:
+        raise TypeError("config['kmeans_tuning_n_clusters'] must be a non-empty list[int]")
+    if not all(isinstance(v, int) and v >= 2 for v in kmeans_grid):
+        raise ValueError("config['kmeans_tuning_n_clusters'] values must be int >= 2")
+
+    dbscan_eps_grid = normalized.get("dbscan_tuning_eps")
+    if not isinstance(dbscan_eps_grid, list) or not dbscan_eps_grid:
+        raise TypeError("config['dbscan_tuning_eps'] must be a non-empty list[float]")
+    if not all(isinstance(v, (int, float)) and float(v) > 0 for v in dbscan_eps_grid):
+        raise ValueError("config['dbscan_tuning_eps'] values must be > 0")
+
+    dbscan_min_samples_grid = normalized.get("dbscan_tuning_min_samples")
+    if not isinstance(dbscan_min_samples_grid, list) or not dbscan_min_samples_grid:
+        raise TypeError("config['dbscan_tuning_min_samples'] must be a non-empty list[int]")
+    if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid):
+        raise ValueError("config['dbscan_tuning_min_samples'] values must be int >= 1")
 
     return normalized
 
@@ -122,6 +155,123 @@ def _assign_dbscan_labels(
     return labels
 
 
+def _safe_silhouette_score(x: np.ndarray, labels: np.ndarray) -> float:
+    unique = set(int(v) for v in labels.tolist())
+    if len(unique) <= 1:
+        return -1.0
+    if unique == {-1}:
+        return -1.0
+    if len(labels) < 2:
+        return -1.0
+    try:
+        return float(silhouette_score(x, labels))
+    except Exception:
+        return -1.0
+
+
+def _plot_kmeans_tuning(results: list[dict[str, float]], output_dir: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    sorted_rows = sorted(results, key=lambda row: int(row["n_clusters"]))
+    x = [int(row["n_clusters"]) for row in sorted_rows]
+    y = [float(row["silhouette_score"]) for row in sorted_rows]
+    fig = plt.figure(figsize=(8, 5))
+    plt.plot(x, y, marker="o")
+    plt.title("KMeans fine-tuning summary")
+    plt.xlabel("n_clusters")
+    plt.ylabel("silhouette_score")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(output_dir / "clustering_tuning_kmeans.png", bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_dbscan_tuning(results: list[dict[str, float]], output_dir: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(results)
+    if frame.empty:
+        return
+    pivot = frame.pivot(index="min_samples", columns="eps", values="silhouette_score").sort_index().sort_index(axis=1)
+    fig = plt.figure(figsize=(9, 6))
+    plt.imshow(pivot.to_numpy(), aspect="auto")
+    plt.colorbar(label="silhouette_score")
+    plt.title("DBSCAN fine-tuning summary")
+    plt.xlabel("eps")
+    plt.ylabel("min_samples")
+    plt.xticks(range(len(pivot.columns)), [f"{float(v):.2f}" for v in pivot.columns], rotation=45, ha="right")
+    plt.yticks(range(len(pivot.index)), [str(int(v)) for v in pivot.index])
+    plt.tight_layout()
+    fig.savefig(output_dir / "clustering_tuning_dbscan.png", bbox_inches="tight")
+    plt.close(fig)
+
+
+def _write_tuning_artifact(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _load_tuning_artifact(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
+def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, float]]]:
+    results: list[dict[str, float]] = []
+    best: dict[str, Any] | None = None
+    for n_clusters in sorted({int(v) for v in cfg["kmeans_tuning_n_clusters"]}):
+        if n_clusters >= x_train.shape[0]:
+            continue
+        model = KMeans(n_clusters=n_clusters, random_state=int(cfg["kmeans_random_state"]), n_init=int(cfg["kmeans_n_init"]))
+        labels = model.fit_predict(x_train)
+        score = _safe_silhouette_score(x_train, labels)
+        row = {"n_clusters": float(n_clusters), "silhouette_score": float(score)}
+        results.append(row)
+        if best is None or score > float(best["silhouette_score"]):
+            best = {"n_clusters": n_clusters, "silhouette_score": score}
+    if best is None:
+        best = {"n_clusters": int(cfg["kmeans_n_clusters"]), "silhouette_score": -1.0}
+    return best, results
+
+
+def _tune_dbscan(
+    x_all: np.ndarray,
+    x_train: np.ndarray,
+    ordered_train_mask: np.ndarray,
+    cfg: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, float]]]:
+    results: list[dict[str, float]] = []
+    best: dict[str, Any] | None = None
+    eps_grid = sorted({float(v) for v in cfg["dbscan_tuning_eps"]})
+    min_samples_grid = sorted({int(v) for v in cfg["dbscan_tuning_min_samples"]})
+    for eps in eps_grid:
+        for min_samples in min_samples_grid:
+            labels = _assign_dbscan_labels(x_all, x_train, ordered_train_mask, eps=eps, min_samples=min_samples)
+            score = _safe_silhouette_score(x_all, labels)
+            row = {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
+            results.append(row)
+            if best is None or score > float(best["silhouette_score"]):
+                best = {"eps": eps, "min_samples": min_samples, "silhouette_score": score}
+    if best is None:
+        best = {"eps": float(cfg["dbscan_eps"]), "min_samples": int(cfg["dbscan_min_samples"]), "silhouette_score": -1.0}
+    return best, results
+
+
 def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd.DataFrame:
     if not isinstance(df_or_path, pd.DataFrame):
         raise TypeError("06c_build_features_clustering.run expects a pandas DataFrame input")
@@ -153,9 +303,59 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     run_kmeans = method in {"kmeans", "both"}
     run_dbscan = method in {"dbscan", "both"}
 
+    artifact_path = Path(str(cfg["tuning_artifact_path"]))
+    plot_dir = Path(str(cfg["tuning_plot_dir"]))
+    artifact = _load_tuning_artifact(artifact_path) if bool(cfg["auto_tune"]) else None
+    artifact_kmeans = artifact.get("kmeans") if isinstance(artifact, dict) else None
+    artifact_dbscan = artifact.get("dbscan") if isinstance(artifact, dict) else None
+    kmeans_choice: dict[str, Any] | None = None
+    dbscan_choice: dict[str, Any] | None = None
+    kmeans_results: list[dict[str, float]] = []
+    dbscan_results: list[dict[str, float]] = []
+
+    if run_kmeans:
+        if isinstance(artifact_kmeans, dict) and "n_clusters" in artifact_kmeans:
+            kmeans_choice = {"n_clusters": int(artifact_kmeans["n_clusters"])}
+            kmeans_results = [dict(v) for v in artifact.get("kmeans_results", [])] if isinstance(artifact, dict) else []
+        elif bool(cfg["auto_tune"]):
+            kmeans_choice, kmeans_results = _tune_kmeans(x_train, cfg)
+        else:
+            kmeans_choice = {"n_clusters": int(cfg["kmeans_n_clusters"])}
+
+    if run_dbscan:
+        if isinstance(artifact_dbscan, dict) and {"eps", "min_samples"}.issubset(artifact_dbscan.keys()):
+            dbscan_choice = {"eps": float(artifact_dbscan["eps"]), "min_samples": int(artifact_dbscan["min_samples"])}
+            dbscan_results = [dict(v) for v in artifact.get("dbscan_results", [])] if isinstance(artifact, dict) else []
+        elif bool(cfg["auto_tune"]):
+            dbscan_choice, dbscan_results = _tune_dbscan(x_all, x_train, ordered_train_mask, cfg)
+        else:
+            dbscan_choice = {"eps": float(cfg["dbscan_eps"]), "min_samples": int(cfg["dbscan_min_samples"])}
+
+    if bool(cfg["auto_tune"]) and artifact is None:
+        artifact_payload: dict[str, Any] = {
+            "selected_source_columns": source_cols,
+            "method": method,
+            "fit_scope": cfg["fit_scope"],
+        }
+        if kmeans_choice is not None:
+            artifact_payload["kmeans"] = {"n_clusters": int(kmeans_choice["n_clusters"])}
+            artifact_payload["kmeans_results"] = kmeans_results
+        if dbscan_choice is not None:
+            artifact_payload["dbscan"] = {
+                "eps": float(dbscan_choice["eps"]),
+                "min_samples": int(dbscan_choice["min_samples"]),
+            }
+            artifact_payload["dbscan_results"] = dbscan_results
+        _write_tuning_artifact(artifact_path, artifact_payload)
+
+    if run_kmeans and kmeans_results:
+        _plot_kmeans_tuning(kmeans_results, plot_dir)
+    if run_dbscan and dbscan_results:
+        _plot_dbscan_tuning(dbscan_results, plot_dir)
+
     if run_kmeans:
         kmeans = KMeans(
-            n_clusters=int(cfg["kmeans_n_clusters"]),
+            n_clusters=int((kmeans_choice or {}).get("n_clusters", cfg["kmeans_n_clusters"])),
             random_state=int(cfg["kmeans_random_state"]),
             n_init=int(cfg["kmeans_n_init"]),
         )
@@ -167,8 +367,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             x_all,
             x_train,
             ordered_train_mask,
-            eps=float(cfg["dbscan_eps"]),
-            min_samples=int(cfg["dbscan_min_samples"]),
+            eps=float((dbscan_choice or {}).get("eps", cfg["dbscan_eps"])),
+            min_samples=int((dbscan_choice or {}).get("min_samples", cfg["dbscan_min_samples"])),
         )
 
     result = ordered.sort_values("__row_id", kind="mergesort").drop(columns=["__row_id"], errors="ignore")
