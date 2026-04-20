@@ -165,6 +165,27 @@ def _compute_realized_return(outcome: pd.Series, odds: pd.Series, *, payout_conv
     raise ValueError(f"Unsupported payout convention: {payout_convention}")
 
 
+def _validate_side_probabilities(
+    *,
+    prob_team1: pd.Series,
+    prob_team2: pd.Series,
+    tolerance: float = 1e-6,
+) -> None:
+    prob_team1_numeric = pd.to_numeric(prob_team1, errors="coerce")
+    prob_team2_numeric = pd.to_numeric(prob_team2, errors="coerce")
+    invalid_numeric_mask = prob_team1_numeric.isna() | prob_team2_numeric.isna()
+    if invalid_numeric_mask.any():
+        invalid_count = int(invalid_numeric_mask.sum())
+        raise ValueError(f"Encountered {invalid_count} rows with non-numeric match probabilities")
+
+    sum_to_one_mask = np.isclose(prob_team1_numeric + prob_team2_numeric, 1.0, atol=tolerance, rtol=0.0)
+    if not bool(np.all(sum_to_one_mask)):
+        invalid_count = int((~sum_to_one_mask).sum())
+        raise ValueError(
+            f"Encountered {invalid_count} rows where team-side probabilities do not sum to 1 within tolerance {tolerance}"
+        )
+
+
 def _compute_market_pricing_evaluation(
     *,
     model_name: str,
@@ -643,16 +664,24 @@ def run_model_training_experiments(
             market_summary_rows.append(pricing_summary)
         val_proba = np.clip(best_pipeline.predict_proba(x_val)[:, 1], 1e-15, 1.0 - 1e-15)
         val_pred = best_pipeline.predict(x_val)
+        val_prob_team1 = pd.Series(val_proba, dtype=float)
+        val_prob_team2 = 1.0 - val_prob_team1
+        _validate_side_probabilities(prob_team1=val_prob_team1, prob_team2=val_prob_team2)
         val_predictions = val_identifiers.reset_index(drop=True).copy(deep=True)
         val_predictions["model_name"] = model_name
-        val_predictions["prob_team1_win"] = val_proba
+        val_predictions["prob_team1_victory"] = val_prob_team1
+        val_predictions["prob_team2_victory"] = val_prob_team2
         val_predictions["predicted_label_team1_win"] = val_pred
         val_predictions["actual_team1_win"] = y_val.reset_index(drop=True).astype(int)
         match_probability_prediction_rows.extend(val_predictions.to_dict(orient="records"))
 
+        test_prob_team1 = pd.Series(clipped_test_proba, dtype=float)
+        test_prob_team2 = 1.0 - test_prob_team1
+        _validate_side_probabilities(prob_team1=test_prob_team1, prob_team2=test_prob_team2)
         test_predictions = test_identifiers.reset_index(drop=True).copy(deep=True)
         test_predictions["model_name"] = model_name
-        test_predictions["prob_team1_win"] = clipped_test_proba
+        test_predictions["prob_team1_victory"] = test_prob_team1
+        test_predictions["prob_team2_victory"] = test_prob_team2
         test_predictions["predicted_label_team1_win"] = test_pred
         test_predictions["actual_team1_win"] = y_test.reset_index(drop=True).astype(int)
         match_probability_prediction_rows.extend(test_predictions.to_dict(orient="records"))
