@@ -101,7 +101,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
         self.assertIn("winner_proxy_flag", output)
         self.assertIn("[leakage-debug] near-perfect target copies detected:", output)
 
-    def test_feature_set_training_outputs_cross_run_accuracy_comparison(self) -> None:
+    def test_feature_set_training_outputs_cross_run_pricing_metric_comparison(self) -> None:
         rows = []
         for i in range(120):
             rows.append(
@@ -139,13 +139,25 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             )
 
             summary_dir = Path(tmpdir) / "model_training_feature_sets"
-            self.assertTrue((summary_dir / "feature_set_accuracy_comparison.csv").exists())
-            self.assertTrue((summary_dir / "feature_set_accuracy_comparison.png").exists())
+            summary_csv = summary_dir / "feature_set_pricing_metric_comparison.csv"
+            self.assertTrue(summary_csv.exists())
+            self.assertTrue((summary_dir / "feature_set_pricing_metric_comparison.png").exists())
+
+            summary_df = pd.read_csv(summary_csv)
+            self.assertTrue(
+                {
+                    "feature_set",
+                    "model",
+                    "test_log_loss",
+                    "test_brier_score",
+                    "test_ece_10_bins",
+                }.issubset(set(summary_df.columns))
+            )
 
             self.assertIn("structured_only", manifests)
             artifacts = manifests["structured_only"].get("artifacts", {})
-            self.assertIn("feature_set_accuracy_comparison_csv", artifacts)
-            self.assertIn("feature_set_accuracy_comparison_plot", artifacts)
+            self.assertIn("feature_set_pricing_metric_comparison_csv", artifacts)
+            self.assertIn("feature_set_pricing_metric_comparison_plot", artifacts)
 
 
 if __name__ == "__main__":
