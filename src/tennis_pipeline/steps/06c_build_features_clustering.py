@@ -92,6 +92,16 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid):
         raise ValueError("config['dbscan_tuning_min_samples'] values must be int >= 1")
 
+    tuning_score_sample_size = normalized.get("tuning_score_sample_size")
+    if not isinstance(tuning_score_sample_size, int):
+        raise TypeError("config['tuning_score_sample_size'] must be an int")
+    if tuning_score_sample_size < 1:
+        raise ValueError("config['tuning_score_sample_size'] must be >= 1")
+
+    tuning_score_random_state = normalized.get("tuning_score_random_state")
+    if not isinstance(tuning_score_random_state, int):
+        raise TypeError("config['tuning_score_random_state'] must be an int")
+
     parallel_n_jobs = normalized.get("parallel_n_jobs")
     if not isinstance(parallel_n_jobs, int):
         raise TypeError("config['parallel_n_jobs'] must be an int")
@@ -172,7 +182,70 @@ def _assign_dbscan_labels(
     return labels
 
 
-def _safe_silhouette_score(x: np.ndarray, labels: np.ndarray) -> float:
+def _sample_for_silhouette(
+    x: np.ndarray,
+    labels: np.ndarray,
+    *,
+    sample_size: int,
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if sample_size <= 0 or len(x) <= sample_size:
+        return x, labels
+
+    rng = np.random.default_rng(seed=random_state)
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    proportions = counts / counts.sum()
+    target_counts = np.floor(proportions * sample_size).astype(int)
+    target_counts = np.minimum(target_counts, counts)
+
+    remainder = sample_size - int(target_counts.sum())
+    if remainder > 0:
+        fractional = proportions * sample_size - np.floor(proportions * sample_size)
+        order = np.argsort(fractional)[::-1]
+        for idx in order:
+            if remainder == 0:
+                break
+            if target_counts[idx] < counts[idx]:
+                target_counts[idx] += 1
+                remainder -= 1
+
+    selected_parts: list[np.ndarray] = []
+    for label, take in zip(unique_labels, target_counts, strict=True):
+        if take <= 0:
+            continue
+        label_indices = np.flatnonzero(labels == label)
+        take_int = int(min(take, len(label_indices)))
+        if take_int <= 0:
+            continue
+        chosen = rng.choice(label_indices, size=take_int, replace=False)
+        selected_parts.append(chosen.astype(int, copy=False))
+
+    if not selected_parts:
+        sampled_idx = rng.choice(np.arange(len(x)), size=sample_size, replace=False).astype(int, copy=False)
+        return x[sampled_idx], labels[sampled_idx]
+
+    sampled_idx = np.concatenate(selected_parts)
+    if len(sampled_idx) > sample_size:
+        sampled_idx = rng.choice(sampled_idx, size=sample_size, replace=False)
+    elif len(sampled_idx) < sample_size:
+        needed = sample_size - len(sampled_idx)
+        remaining = np.setdiff1d(np.arange(len(x)), sampled_idx, assume_unique=False)
+        if len(remaining) > 0:
+            extra_take = min(needed, len(remaining))
+            extra = rng.choice(remaining, size=extra_take, replace=False)
+            sampled_idx = np.concatenate([sampled_idx, extra.astype(int, copy=False)])
+
+    rng.shuffle(sampled_idx)
+    return x[sampled_idx], labels[sampled_idx]
+
+
+def _safe_silhouette_score(
+    x: np.ndarray,
+    labels: np.ndarray,
+    *,
+    sample_size: int,
+    random_state: int,
+) -> float:
     unique = set(int(v) for v in labels.tolist())
     if len(unique) <= 1:
         return -1.0
@@ -180,8 +253,17 @@ def _safe_silhouette_score(x: np.ndarray, labels: np.ndarray) -> float:
         return -1.0
     if len(labels) < 2:
         return -1.0
+    x_eval, labels_eval = _sample_for_silhouette(
+        x,
+        labels,
+        sample_size=sample_size,
+        random_state=random_state,
+    )
+    unique_eval = set(int(v) for v in labels_eval.tolist())
+    if len(unique_eval) <= 1 or unique_eval == {-1}:
+        return -1.0
     try:
-        return float(silhouette_score(x, labels))
+        return float(silhouette_score(x_eval, labels_eval))
     except Exception:
         return -1.0
 
@@ -259,7 +341,12 @@ def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str,
                 n_init=int(cfg["kmeans_n_init"]),
             )
             labels = model.fit_predict(x_train)
-        score = _safe_silhouette_score(x_train, labels)
+        score = _safe_silhouette_score(
+            x_train,
+            labels,
+            sample_size=int(cfg["tuning_score_sample_size"]),
+            random_state=int(cfg["tuning_score_random_state"]),
+        )
         return {"n_clusters": float(n_clusters), "silhouette_score": float(score)}
 
     results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
@@ -296,7 +383,12 @@ def _tune_dbscan(
                 min_samples=min_samples,
                 n_jobs=1,
             )
-        score = _safe_silhouette_score(x_all, labels)
+        score = _safe_silhouette_score(
+            x_all,
+            labels,
+            sample_size=int(cfg["tuning_score_sample_size"]),
+            random_state=int(cfg["tuning_score_random_state"]),
+        )
         return {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
 
     results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
