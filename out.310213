@@ -1,0 +1,26 @@
+[pipeline] starting tennis pipeline run
+[pipeline] step 01_load_raw: start
+[pipeline] step 01_load_raw: complete (94,184 rows, 382 columns)
+[pipeline] step 02_clean_schema: start
+[pipeline] step 02_clean_schema: complete (94,184 rows, 382 columns)
+[pipeline] step 03_clean_values: start
+[pipeline] step 03_clean_values: complete (92,312 rows, 382 columns)
+[pipeline] step 04_split_roles: start
+[pipeline] step 04_split_roles: complete (92,312 rows, 383 columns)
+[pipeline] step 05_build_features_static: start
+[pipeline] step 05_build_features_static: complete (92,112 rows, 626 columns)
+[pipeline] step 06_build_features_temporal_elo: start
+[pipeline] step 06_build_features_temporal_elo: complete (92,112 rows, 626 columns)
+[pipeline] step 06b_build_features_temporal_rolling: start
+[pipeline] step 06b_build_features_temporal_rolling: complete (92,112 rows, 632 columns)
+[pipeline] step 06c_build_features_clustering: start
+[pipeline] step 06c_build_features_clustering: complete (92,112 rows, 633 columns) [method=kmeans]
+[pipeline] step 07_finalize_model_table: start
+[pipeline] step 07_finalize_model_table: complete (92,112 rows, 60 columns)
+[pipeline] final model table written: data/processed/model_table.parquet
+[pipeline] materializing experiment feature-set tables
+[pipeline] materialized 2 feature-set tables
+[pipeline] running baseline model-training experiment (run 1 / 1)
+[pipeline] baseline training start: 2026-04-20T23:13:57.663379+00:00
+[pipeline] baseline training end: 2026-04-20T23:17:56.818237+00:00 (elapsed 239.15s)
+[pipeline] pipeline run complete

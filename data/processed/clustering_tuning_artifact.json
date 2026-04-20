@@ -1,0 +1,274 @@
+{
+  "selected_source_columns": [
+    "elo_diff_pre",
+    "elo_diff_team1",
+    "elo_prob_team1_pre",
+    "elo_team1_pre",
+    "elo_team2_pre",
+    "temporal_team1_rolling_avg_elo",
+    "temporal_team1_rolling_avg_sgl_roll_rank",
+    "temporal_team1_rolling_win_pct",
+    "temporal_team2_rolling_avg_elo",
+    "temporal_team2_rolling_avg_sgl_roll_rank",
+    "temporal_team2_rolling_win_pct"
+  ],
+  "method": "both",
+  "fit_scope": "train_only",
+  "kmeans": {
+    "n_clusters": 3
+  },
+  "kmeans_results": [
+    {
+      "n_clusters": 2.0,
+      "silhouette_score": 0.23859981041041575
+    },
+    {
+      "n_clusters": 3.0,
+      "silhouette_score": 0.2573389302452334
+    },
+    {
+      "n_clusters": 4.0,
+      "silhouette_score": 0.23199622447335821
+    },
+    {
+      "n_clusters": 5.0,
+      "silhouette_score": 0.22245965348326813
+    },
+    {
+      "n_clusters": 6.0,
+      "silhouette_score": 0.2209061417042466
+    },
+    {
+      "n_clusters": 7.0,
+      "silhouette_score": 0.221825570973984
+    },
+    {
+      "n_clusters": 8.0,
+      "silhouette_score": 0.22138232458669124
+    },
+    {
+      "n_clusters": 9.0,
+      "silhouette_score": 0.20625482666995867
+    },
+    {
+      "n_clusters": 10.0,
+      "silhouette_score": 0.2058802666880876
+    }
+  ],
+  "dbscan": {
+    "eps": 1.5,
+    "min_samples": 10
+  },
+  "dbscan_results": [
+    {
+      "eps": 0.3,
+      "min_samples": 5.0,
+      "silhouette_score": -0.7034730131574769
+    },
+    {
+      "eps": 0.3,
+      "min_samples": 10.0,
+      "silhouette_score": -0.6215028833235292
+    },
+    {
+      "eps": 0.3,
+      "min_samples": 15.0,
+      "silhouette_score": -0.4844453899686587
+    },
+    {
+      "eps": 0.3,
+      "min_samples": 20.0,
+      "silhouette_score": -0.21831503248909806
+    },
+    {
+      "eps": 0.3,
+      "min_samples": 25.0,
+      "silhouette_score": -0.2194063663158304
+    },
+    {
+      "eps": 0.3,
+      "min_samples": 30.0,
+      "silhouette_score": -0.16209087363470473
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 5.0,
+      "silhouette_score": -0.5711421939982811
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 10.0,
+      "silhouette_score": -0.4822505087361221
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 15.0,
+      "silhouette_score": -0.3786404164194114
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 20.0,
+      "silhouette_score": -0.3867074057411324
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 25.0,
+      "silhouette_score": -0.3070113752785226
+    },
+    {
+      "eps": 0.5,
+      "min_samples": 30.0,
+      "silhouette_score": -0.37965300523061507
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 5.0,
+      "silhouette_score": -0.20265470601226818
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 10.0,
+      "silhouette_score": -0.022151678772710147
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 15.0,
+      "silhouette_score": 0.03207458486316151
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 20.0,
+      "silhouette_score": 0.06564128382905102
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 25.0,
+      "silhouette_score": 0.12333791984294845
+    },
+    {
+      "eps": 0.7,
+      "min_samples": 30.0,
+      "silhouette_score": 0.12270321112399435
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 5.0,
+      "silhouette_score": -0.1230171465001151
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 10.0,
+      "silhouette_score": 0.11204418107995304
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 15.0,
+      "silhouette_score": 0.16457232693920407
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 20.0,
+      "silhouette_score": 0.16670192673634532
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 25.0,
+      "silhouette_score": 0.15134289930404568
+    },
+    {
+      "eps": 0.9,
+      "min_samples": 30.0,
+      "silhouette_score": 0.16123837905742958
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 5.0,
+      "silhouette_score": 0.37514714340182387
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 10.0,
+      "silhouette_score": 0.4207223636058342
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 15.0,
+      "silhouette_score": 0.254819362712325
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 20.0,
+      "silhouette_score": 0.3006370910366332
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 25.0,
+      "silhouette_score": 0.19746693706664722
+    },
+    {
+      "eps": 1.1,
+      "min_samples": 30.0,
+      "silhouette_score": 0.18405542259301771
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 5.0,
+      "silhouette_score": 0.48449697932494196
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 10.0,
+      "silhouette_score": 0.523724303770764
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 15.0,
+      "silhouette_score": 0.5209836626641888
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 20.0,
+      "silhouette_score": 0.5063478899453272
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 25.0,
+      "silhouette_score": 0.40671645423165104
+    },
+    {
+      "eps": 1.3,
+      "min_samples": 30.0,
+      "silhouette_score": 0.48684730836640056
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 5.0,
+      "silhouette_score": 0.5430897210341212
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 10.0,
+      "silhouette_score": 0.5649306952159249
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 15.0,
+      "silhouette_score": 0.5585739183880568
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 20.0,
+      "silhouette_score": 0.548478095494204
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 25.0,
+      "silhouette_score": 0.5392318854511992
+    },
+    {
+      "eps": 1.5,
+      "min_samples": 30.0,
+      "silhouette_score": 0.5316270793071994
+    }
+  ]
+}
