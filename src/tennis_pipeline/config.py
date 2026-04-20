@@ -57,6 +57,11 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "fit_scope": "train_only",
     # Auto-tune clustering hyperparameters to maximize silhouette score.
     "auto_tune": True,
+    # Production safeguard: when auto_tune=True and row count exceeds this value,
+    # enforce fit_scope="train_only" unless allow_auto_tune_all_data_override=True.
+    "auto_tune_train_only_max_rows": 50_000,
+    # Explicit escape hatch for large-table all-data auto-tuning (diagnostics only).
+    "allow_auto_tune_all_data_override": False,
     # Tuning profile selector: "full" for exhaustive-ish search, "fast" for compact search grids.
     "tuning_profile": "full",
     # Auto-switch to "fast" profile when row count is high, unless tuning_profile is explicitly set by caller.

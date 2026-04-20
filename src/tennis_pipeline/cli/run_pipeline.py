@@ -285,7 +285,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("none", "kmeans", "dbscan", "both"),
         help=(
             "Optional clustering stage mode (06c_build_features_clustering). "
-            "Use kmeans, dbscan, or both. Default: none."
+            "Use kmeans, dbscan, or both. Default: none. "
+            "Note: for large datasets, auto-tuning enforces fit_scope='train_only' unless "
+            "06c_build_features_clustering.allow_auto_tune_all_data_override=true is set in config."
         ),
     )
     parser.add_argument(
