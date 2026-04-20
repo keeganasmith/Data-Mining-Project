@@ -311,7 +311,7 @@ def _safe_silhouette_score(
         return -1.0
 
 
-def _plot_kmeans_tuning(results: list[dict[str, float]], output_dir: Path) -> None:
+def _plot_kmeans_tuning(results: list[dict[str, Any]], output_dir: Path) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -322,11 +322,21 @@ def _plot_kmeans_tuning(results: list[dict[str, float]], output_dir: Path) -> No
     x = [int(row["n_clusters"]) for row in sorted_rows]
     y = [float(row["silhouette_score"]) for row in sorted_rows]
     fig = plt.figure(figsize=(8, 5))
-    plt.plot(x, y, marker="o")
+    plt.plot(x, y, marker="o", alpha=0.6, label="all evaluated")
+    coarse_x = [int(row["n_clusters"]) for row in sorted_rows if str(row.get("stage", "")) == "coarse"]
+    coarse_y = [float(row["silhouette_score"]) for row in sorted_rows if str(row.get("stage", "")) == "coarse"]
+    local_x = [int(row["n_clusters"]) for row in sorted_rows if str(row.get("stage", "")) == "local_refine"]
+    local_y = [float(row["silhouette_score"]) for row in sorted_rows if str(row.get("stage", "")) == "local_refine"]
+    if coarse_x:
+        plt.scatter(coarse_x, coarse_y, marker="o", s=70, label="coarse")
+    if local_x:
+        plt.scatter(local_x, local_y, marker="s", s=70, label="local refine")
     plt.title("KMeans fine-tuning summary")
     plt.xlabel("n_clusters")
     plt.ylabel("silhouette_score")
     plt.grid(alpha=0.3)
+    if coarse_x or local_x:
+        plt.legend()
     plt.tight_layout()
     fig.savefig(output_dir / "clustering_tuning_kmeans.png", bbox_inches="tight")
     plt.close(fig)
@@ -373,10 +383,13 @@ def _load_tuning_artifact(path: Path) -> dict[str, Any] | None:
     return loaded
 
 
-def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, float]]]:
+def _tune_kmeans(
+    x_train: np.ndarray,
+    cfg: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     candidates = [n_clusters for n_clusters in sorted({int(v) for v in cfg["kmeans_tuning_n_clusters"]}) if n_clusters < x_train.shape[0]]
 
-    def _evaluate(n_clusters: int) -> dict[str, float]:
+    def _evaluate(n_clusters: int, stage: str) -> dict[str, Any]:
         with threadpool_limits(limits=int(cfg["parallel_inner_threads"])):
             model = KMeans(
                 n_clusters=n_clusters,
@@ -390,11 +403,43 @@ def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str,
             sample_size=int(cfg["tuning_score_sample_size"]),
             random_state=int(cfg["tuning_score_random_state"]),
         )
-        return {"n_clusters": float(n_clusters), "silhouette_score": float(score)}
+        return {"n_clusters": float(n_clusters), "silhouette_score": float(score), "stage": stage}
 
-    results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(n_clusters) for n_clusters in candidates
+    if len(candidates) <= 4:
+        coarse_candidates = list(candidates)
+    else:
+        coarse_idx = sorted({0, len(candidates) // 2, len(candidates) - 1})
+        coarse_candidates = [candidates[idx] for idx in coarse_idx]
+
+    coarse_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(n_clusters, "coarse") for n_clusters in coarse_candidates
     )
+
+    best_coarse: dict[str, Any] | None = None
+    for row in coarse_results:
+        score = float(row["silhouette_score"])
+        if best_coarse is None or score > float(best_coarse["silhouette_score"]):
+            best_coarse = {"n_clusters": int(row["n_clusters"]), "silhouette_score": score}
+
+    neighborhood_radius = 2 if len(candidates) >= 7 else 1
+    best_coarse_n_clusters = int((best_coarse or {}).get("n_clusters", int(cfg["kmeans_n_clusters"])))
+    local_candidates = [
+        n_clusters
+        for n_clusters in candidates
+        if abs(n_clusters - best_coarse_n_clusters) <= neighborhood_radius and n_clusters not in set(coarse_candidates)
+    ]
+    local_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(n_clusters, "local_refine") for n_clusters in local_candidates
+    )
+
+    result_rows_by_cluster: dict[int, dict[str, Any]] = {}
+    for row in [*coarse_results, *local_results]:
+        key = int(row["n_clusters"])
+        prior = result_rows_by_cluster.get(key)
+        if prior is None or float(row["silhouette_score"]) >= float(prior["silhouette_score"]):
+            result_rows_by_cluster[key] = dict(row)
+
+    results = sorted(result_rows_by_cluster.values(), key=lambda row: int(row["n_clusters"]))
     best: dict[str, Any] | None = None
     for row in results:
         score = float(row["silhouette_score"])
@@ -402,7 +447,13 @@ def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str,
             best = {"n_clusters": int(row["n_clusters"]), "silhouette_score": score}
     if best is None:
         best = {"n_clusters": int(cfg["kmeans_n_clusters"]), "silhouette_score": -1.0}
-    return best, results
+    stage_details: dict[str, Any] = {
+        "coarse_candidates": coarse_candidates,
+        "best_coarse_n_clusters": int(best_coarse_n_clusters),
+        "local_neighborhood_radius": int(neighborhood_radius),
+        "local_candidates": local_candidates,
+    }
+    return best, results, stage_details
 
 
 def _tune_dbscan(
@@ -488,15 +539,18 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     artifact_dbscan = artifact.get("dbscan") if isinstance(artifact, dict) else None
     kmeans_choice: dict[str, Any] | None = None
     dbscan_choice: dict[str, Any] | None = None
-    kmeans_results: list[dict[str, float]] = []
+    kmeans_results: list[dict[str, Any]] = []
+    kmeans_stage_details: dict[str, Any] | None = None
     dbscan_results: list[dict[str, float]] = []
 
     if run_kmeans:
         if isinstance(artifact_kmeans, dict) and "n_clusters" in artifact_kmeans:
             kmeans_choice = {"n_clusters": int(artifact_kmeans["n_clusters"])}
             kmeans_results = [dict(v) for v in artifact.get("kmeans_results", [])] if isinstance(artifact, dict) else []
+            if isinstance(artifact, dict) and isinstance(artifact.get("kmeans_tuning_stages"), dict):
+                kmeans_stage_details = dict(artifact["kmeans_tuning_stages"])
         elif bool(tuned_cfg["auto_tune"]):
-            kmeans_choice, kmeans_results = _tune_kmeans(x_train, tuned_cfg)
+            kmeans_choice, kmeans_results, kmeans_stage_details = _tune_kmeans(x_train, tuned_cfg)
         else:
             kmeans_choice = {"n_clusters": int(tuned_cfg["kmeans_n_clusters"])}
 
@@ -519,6 +573,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
         if kmeans_choice is not None:
             artifact_payload["kmeans"] = {"n_clusters": int(kmeans_choice["n_clusters"])}
             artifact_payload["kmeans_results"] = kmeans_results
+            if kmeans_stage_details is not None:
+                artifact_payload["kmeans_tuning_stages"] = kmeans_stage_details
         if dbscan_choice is not None:
             artifact_payload["dbscan"] = {
                 "eps": float(dbscan_choice["eps"]),
