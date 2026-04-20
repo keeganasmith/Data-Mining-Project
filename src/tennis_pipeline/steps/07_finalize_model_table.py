@@ -25,7 +25,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "surface_context",
         "court_context",
     ],
-    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_"],
+    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_", "temporal_", "cluster_"],
     "drop_columns": [
         "winner_player_id",
         "loser_player_id",

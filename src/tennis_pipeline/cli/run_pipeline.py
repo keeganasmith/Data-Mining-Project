@@ -35,6 +35,7 @@ STEP_MODULES: tuple[str, ...] = (
     "05_build_features_static",
     "06_build_features_temporal_elo",
     "06b_build_features_temporal_rolling",
+    "06c_build_features_clustering",
     "07_finalize_model_table",
 )
 
@@ -106,6 +107,7 @@ def run_pipeline(
     *,
     use_elo: bool = False,
     use_temporal_features: bool = False,
+    clustering_method: str = "none",
     run_feature_set_experiment: bool = False,
     config_path: str | Path | None = None,
     training_profile: str | None = None,
@@ -127,6 +129,7 @@ def run_pipeline(
 
     effective_use_elo = use_elo or run_feature_set_experiment
     effective_use_temporal_features = use_temporal_features
+    effective_clustering_method = clustering_method
 
     for step_name in STEP_MODULES:
         print(f"[pipeline] step {step_name}: start")
@@ -145,6 +148,28 @@ def run_pipeline(
             run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
             print(f"[pipeline] step {step_name}: skipped (temporal rolling disabled)")
+            continue
+
+        if step_name == "06c_build_features_clustering":
+            if effective_clustering_method == "none":
+                if not isinstance(current, pd.DataFrame):
+                    raise TypeError("Pipeline state must be DataFrame before clustering toggle branch")
+                run_stage_checks(current, step_name)
+                current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+                print(f"[pipeline] step {step_name}: skipped (clustering disabled)")
+                continue
+            step_cfg_base = dict(cfg.get(step_name, {}))
+            step_cfg_base["method"] = effective_clustering_method
+            module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
+            current = module.run(current, config=step_cfg_base)
+            if not isinstance(current, pd.DataFrame):
+                raise TypeError(f"[{step_name}] Expected DataFrame output from step module")
+            run_stage_checks(current, step_name)
+            current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+            print(
+                f"[pipeline] step {step_name}: complete ({len(current):,} rows, {len(current.columns):,} columns) "
+                f"[method={effective_clustering_method}]"
+            )
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
@@ -255,6 +280,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable temporal rolling feature stage (06b_build_features_temporal_rolling)",
     )
     parser.add_argument(
+        "--clustering-method",
+        default="none",
+        choices=("none", "kmeans", "dbscan", "both"),
+        help=(
+            "Optional clustering stage mode (06c_build_features_clustering). "
+            "Use kmeans, dbscan, or both. Default: none."
+        ),
+    )
+    parser.add_argument(
         "--run-feature-set-experiment",
         action="store_true",
         help=(
@@ -282,6 +316,7 @@ def main() -> None:
         output_dir=args.output_dir,
         use_elo=bool(args.use_elo),
         use_temporal_features=bool(args.use_temporal_features),
+        clustering_method=str(args.clustering_method),
         run_feature_set_experiment=bool(args.run_feature_set_experiment),
         config_path=args.config_path,
         training_profile=args.training_profile,
