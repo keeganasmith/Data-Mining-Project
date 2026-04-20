@@ -35,6 +35,7 @@ from tennis_pipeline.temporal_ordering import prepare_temporal_ordering
 _METHODS = {"kmeans", "dbscan", "both"}
 _FIT_SCOPES = {"train_only", "all_data"}
 _PARALLEL_BACKENDS = {"loky", "threading"}
+_TUNING_PROFILES = {"fast", "full"}
 
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -66,6 +67,16 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if not isinstance(auto_tune, bool):
         raise TypeError("config['auto_tune'] must be a bool")
 
+    tuning_profile = normalized.get("tuning_profile")
+    if tuning_profile not in _TUNING_PROFILES:
+        raise ValueError(f"config['tuning_profile'] must be one of {_TUNING_PROFILES}; got {tuning_profile!r}")
+
+    fast_mode_row_threshold = normalized.get("fast_mode_row_threshold")
+    if not isinstance(fast_mode_row_threshold, int):
+        raise TypeError("config['fast_mode_row_threshold'] must be an int")
+    if fast_mode_row_threshold < 1:
+        raise ValueError("config['fast_mode_row_threshold'] must be >= 1")
+
     artifact_path = normalized.get("tuning_artifact_path")
     if not isinstance(artifact_path, str) or not artifact_path.strip():
         raise TypeError("config['tuning_artifact_path'] must be a non-empty string path")
@@ -80,17 +91,35 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if not all(isinstance(v, int) and v >= 2 for v in kmeans_grid):
         raise ValueError("config['kmeans_tuning_n_clusters'] values must be int >= 2")
 
+    kmeans_grid_fast = normalized.get("kmeans_tuning_n_clusters_fast")
+    if not isinstance(kmeans_grid_fast, list) or not kmeans_grid_fast:
+        raise TypeError("config['kmeans_tuning_n_clusters_fast'] must be a non-empty list[int]")
+    if not all(isinstance(v, int) and v >= 2 for v in kmeans_grid_fast):
+        raise ValueError("config['kmeans_tuning_n_clusters_fast'] values must be int >= 2")
+
     dbscan_eps_grid = normalized.get("dbscan_tuning_eps")
     if not isinstance(dbscan_eps_grid, list) or not dbscan_eps_grid:
         raise TypeError("config['dbscan_tuning_eps'] must be a non-empty list[float]")
     if not all(isinstance(v, (int, float)) and float(v) > 0 for v in dbscan_eps_grid):
         raise ValueError("config['dbscan_tuning_eps'] values must be > 0")
 
+    dbscan_eps_grid_fast = normalized.get("dbscan_tuning_eps_fast")
+    if not isinstance(dbscan_eps_grid_fast, list) or not dbscan_eps_grid_fast:
+        raise TypeError("config['dbscan_tuning_eps_fast'] must be a non-empty list[float]")
+    if not all(isinstance(v, (int, float)) and float(v) > 0 for v in dbscan_eps_grid_fast):
+        raise ValueError("config['dbscan_tuning_eps_fast'] values must be > 0")
+
     dbscan_min_samples_grid = normalized.get("dbscan_tuning_min_samples")
     if not isinstance(dbscan_min_samples_grid, list) or not dbscan_min_samples_grid:
         raise TypeError("config['dbscan_tuning_min_samples'] must be a non-empty list[int]")
     if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid):
         raise ValueError("config['dbscan_tuning_min_samples'] values must be int >= 1")
+
+    dbscan_min_samples_grid_fast = normalized.get("dbscan_tuning_min_samples_fast")
+    if not isinstance(dbscan_min_samples_grid_fast, list) or not dbscan_min_samples_grid_fast:
+        raise TypeError("config['dbscan_tuning_min_samples_fast'] must be a non-empty list[int]")
+    if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid_fast):
+        raise ValueError("config['dbscan_tuning_min_samples_fast'] values must be int >= 1")
 
     parallel_n_jobs = normalized.get("parallel_n_jobs")
     if not isinstance(parallel_n_jobs, int):
@@ -109,6 +138,30 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError("config['parallel_inner_threads'] must be >= 1")
 
     return normalized
+
+
+def _resolve_tuning_profile(
+    cfg: Mapping[str, Any],
+    *,
+    row_count: int,
+    user_config: Mapping[str, Any] | None,
+) -> str:
+    profile = str(cfg["tuning_profile"])
+    explicitly_set = isinstance(user_config, Mapping) and "tuning_profile" in user_config
+    if explicitly_set:
+        return profile
+    if row_count >= int(cfg["fast_mode_row_threshold"]):
+        return "fast"
+    return profile
+
+
+def _apply_tuning_profile(cfg: Mapping[str, Any], profile: str) -> dict[str, Any]:
+    profile_cfg = dict(cfg)
+    if profile == "fast":
+        profile_cfg["kmeans_tuning_n_clusters"] = list(cfg["kmeans_tuning_n_clusters_fast"])
+        profile_cfg["dbscan_tuning_eps"] = list(cfg["dbscan_tuning_eps_fast"])
+        profile_cfg["dbscan_tuning_min_samples"] = list(cfg["dbscan_tuning_min_samples_fast"])
+    return profile_cfg
 
 
 def _select_source_columns(df: pd.DataFrame, prefixes: list[str]) -> list[str]:
@@ -317,14 +370,16 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     cfg = _normalize_config(config)
     out = df_or_path.copy(deep=True)
+    tuning_profile = _resolve_tuning_profile(cfg, row_count=len(out), user_config=config)
+    tuned_cfg = _apply_tuning_profile(cfg, tuning_profile)
 
-    source_cols = _select_source_columns(out, cfg["source_feature_prefixes"])
+    source_cols = _select_source_columns(out, tuned_cfg["source_feature_prefixes"])
     if not source_cols:
         out["cluster_kmeans_id"] = -1
         out["cluster_dbscan_id"] = -1
         return out
 
-    train_mask = _build_temporal_train_mask(out, train_fraction=cfg["train_fraction"], fit_scope=cfg["fit_scope"])
+    train_mask = _build_temporal_train_mask(out, train_fraction=tuned_cfg["train_fraction"], fit_scope=tuned_cfg["fit_scope"])
 
     ordered = out.copy(deep=False)
     ordered["__row_id"] = range(len(ordered))
@@ -338,13 +393,15 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     if x_train.shape[0] == 0:
         x_train = x_all
 
-    method = cfg["method"]
+    method = tuned_cfg["method"]
     run_kmeans = method in {"kmeans", "both"}
     run_dbscan = method in {"dbscan", "both"}
 
-    artifact_path = Path(str(cfg["tuning_artifact_path"]))
-    plot_dir = Path(str(cfg["tuning_plot_dir"]))
-    artifact = _load_tuning_artifact(artifact_path) if bool(cfg["auto_tune"]) else None
+    artifact_path = Path(str(tuned_cfg["tuning_artifact_path"]))
+    plot_dir = Path(str(tuned_cfg["tuning_plot_dir"]))
+    artifact = _load_tuning_artifact(artifact_path) if bool(tuned_cfg["auto_tune"]) else None
+    if isinstance(artifact, dict) and artifact.get("tuning_profile") != tuning_profile:
+        artifact = None
     artifact_kmeans = artifact.get("kmeans") if isinstance(artifact, dict) else None
     artifact_dbscan = artifact.get("dbscan") if isinstance(artifact, dict) else None
     kmeans_choice: dict[str, Any] | None = None
@@ -356,25 +413,26 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
         if isinstance(artifact_kmeans, dict) and "n_clusters" in artifact_kmeans:
             kmeans_choice = {"n_clusters": int(artifact_kmeans["n_clusters"])}
             kmeans_results = [dict(v) for v in artifact.get("kmeans_results", [])] if isinstance(artifact, dict) else []
-        elif bool(cfg["auto_tune"]):
-            kmeans_choice, kmeans_results = _tune_kmeans(x_train, cfg)
+        elif bool(tuned_cfg["auto_tune"]):
+            kmeans_choice, kmeans_results = _tune_kmeans(x_train, tuned_cfg)
         else:
-            kmeans_choice = {"n_clusters": int(cfg["kmeans_n_clusters"])}
+            kmeans_choice = {"n_clusters": int(tuned_cfg["kmeans_n_clusters"])}
 
     if run_dbscan:
         if isinstance(artifact_dbscan, dict) and {"eps", "min_samples"}.issubset(artifact_dbscan.keys()):
             dbscan_choice = {"eps": float(artifact_dbscan["eps"]), "min_samples": int(artifact_dbscan["min_samples"])}
             dbscan_results = [dict(v) for v in artifact.get("dbscan_results", [])] if isinstance(artifact, dict) else []
-        elif bool(cfg["auto_tune"]):
-            dbscan_choice, dbscan_results = _tune_dbscan(x_all, x_train, ordered_train_mask, cfg)
+        elif bool(tuned_cfg["auto_tune"]):
+            dbscan_choice, dbscan_results = _tune_dbscan(x_all, x_train, ordered_train_mask, tuned_cfg)
         else:
-            dbscan_choice = {"eps": float(cfg["dbscan_eps"]), "min_samples": int(cfg["dbscan_min_samples"])}
+            dbscan_choice = {"eps": float(tuned_cfg["dbscan_eps"]), "min_samples": int(tuned_cfg["dbscan_min_samples"])}
 
-    if bool(cfg["auto_tune"]) and artifact is None:
+    if bool(tuned_cfg["auto_tune"]) and artifact is None:
         artifact_payload: dict[str, Any] = {
             "selected_source_columns": source_cols,
             "method": method,
-            "fit_scope": cfg["fit_scope"],
+            "fit_scope": tuned_cfg["fit_scope"],
+            "tuning_profile": tuning_profile,
         }
         if kmeans_choice is not None:
             artifact_payload["kmeans"] = {"n_clusters": int(kmeans_choice["n_clusters"])}
@@ -394,9 +452,9 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     if run_kmeans:
         kmeans = KMeans(
-            n_clusters=int((kmeans_choice or {}).get("n_clusters", cfg["kmeans_n_clusters"])),
-            random_state=int(cfg["kmeans_random_state"]),
-            n_init=int(cfg["kmeans_n_init"]),
+            n_clusters=int((kmeans_choice or {}).get("n_clusters", tuned_cfg["kmeans_n_clusters"])),
+            random_state=int(tuned_cfg["kmeans_random_state"]),
+            n_init=int(tuned_cfg["kmeans_n_init"]),
         )
         kmeans.fit(x_train)
         ordered["cluster_kmeans_id"] = kmeans.predict(x_all).astype(int)
@@ -406,9 +464,9 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             x_all,
             x_train,
             ordered_train_mask,
-            eps=float((dbscan_choice or {}).get("eps", cfg["dbscan_eps"])),
-            min_samples=int((dbscan_choice or {}).get("min_samples", cfg["dbscan_min_samples"])),
-            n_jobs=int(cfg["parallel_n_jobs"]),
+            eps=float((dbscan_choice or {}).get("eps", tuned_cfg["dbscan_eps"])),
+            min_samples=int((dbscan_choice or {}).get("min_samples", tuned_cfg["dbscan_min_samples"])),
+            n_jobs=int(tuned_cfg["parallel_n_jobs"]),
         )
 
     result = ordered.sort_values("__row_id", kind="mergesort").drop(columns=["__row_id"], errors="ignore")
