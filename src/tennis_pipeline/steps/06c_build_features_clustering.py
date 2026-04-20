@@ -101,7 +101,7 @@ def _tuning_fingerprint(df: pd.DataFrame, source_cols: list[str], cfg: Mapping[s
     return fingerprint
 
 
-def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+def _normalize_config(config: Mapping[str, Any] | None, *, row_count: int | None = None) -> dict[str, Any]:
     normalized = dict(CLUSTERING_DEFAULTS)
     if config:
         normalized.update(dict(config))
