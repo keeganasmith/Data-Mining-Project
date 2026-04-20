@@ -33,6 +33,12 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "rf_min_samples_leaf": 15,
     "gbdt_min_samples_leaf": 20,
     "gbdt_subsample": 0.8,
+    "market_team1_odds_column": None,
+    "market_team2_odds_column": None,
+    "market_team1_implied_prob_column": None,
+    "market_team2_implied_prob_column": None,
+    "market_payout_convention": "decimal",
+    "market_edge_bucket_count": 10,
 }
 
 MODEL_TRAINING_PROFILES: dict[str, dict[str, Any]] = {
@@ -67,6 +73,22 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             raise TypeError(f"model_training config['{key}'] must be a non-empty string")
 
+    for key in (
+        "market_team1_odds_column",
+        "market_team2_odds_column",
+        "market_team1_implied_prob_column",
+        "market_team2_implied_prob_column",
+    ):
+        value = cfg.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise TypeError(f"model_training config['{key}'] must be null or a non-empty string")
+
+    if not isinstance(cfg.get("market_payout_convention"), str) or not cfg["market_payout_convention"].strip():
+        raise TypeError("model_training config['market_payout_convention'] must be a non-empty string")
+    cfg["market_payout_convention"] = cfg["market_payout_convention"].strip().lower()
+    if cfg["market_payout_convention"] not in {"decimal", "net_odds"}:
+        raise ValueError("model_training config['market_payout_convention'] must be one of: decimal, net_odds")
+
     for key in ("id_columns", "depth_values"):
         value = cfg.get(key)
         if not isinstance(value, list) or not value:
@@ -98,7 +120,151 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 
     cfg["gbdt_learning_rate"] = float(cfg["gbdt_learning_rate"])
     cfg["gbdt_subsample"] = float(cfg["gbdt_subsample"])
+    cfg["market_edge_bucket_count"] = int(cfg["market_edge_bucket_count"])
+    if cfg["market_edge_bucket_count"] < 2:
+        raise ValueError("model_training config['market_edge_bucket_count'] must be >= 2")
     return cfg
+
+
+def _market_probability_from_odds(odds: pd.Series) -> pd.Series:
+    odds_numeric = pd.to_numeric(odds, errors="coerce")
+    return np.where(odds_numeric > 0, 1.0 / odds_numeric, np.nan)
+
+
+def _resolve_market_side_inputs(
+    source_df: pd.DataFrame,
+    *,
+    odds_column: str | None,
+    implied_prob_column: str | None,
+) -> tuple[pd.Series, pd.Series]:
+    implied_prob = (
+        pd.to_numeric(source_df[implied_prob_column], errors="coerce") if implied_prob_column and implied_prob_column in source_df.columns else pd.Series(np.nan, index=source_df.index)
+    )
+    odds = pd.to_numeric(source_df[odds_column], errors="coerce") if odds_column and odds_column in source_df.columns else pd.Series(np.nan, index=source_df.index)
+
+    if implied_prob.isna().all() and odds.notna().any():
+        implied_prob = pd.Series(_market_probability_from_odds(odds), index=source_df.index)
+    if odds.isna().all() and implied_prob.notna().any():
+        odds = pd.to_numeric(np.where(implied_prob > 0, 1.0 / implied_prob, np.nan), errors="coerce")
+    return implied_prob, odds
+
+
+def _compute_expected_value(model_prob: pd.Series, odds: pd.Series, *, payout_convention: str) -> pd.Series:
+    if payout_convention == "decimal":
+        return (model_prob * odds) - 1.0
+    if payout_convention == "net_odds":
+        return (model_prob * (odds + 1.0)) - 1.0
+    raise ValueError(f"Unsupported payout convention: {payout_convention}")
+
+
+def _compute_realized_return(outcome: pd.Series, odds: pd.Series, *, payout_convention: str) -> pd.Series:
+    if payout_convention == "decimal":
+        return np.where(outcome == 1, odds - 1.0, -1.0)
+    if payout_convention == "net_odds":
+        return np.where(outcome == 1, odds, -1.0)
+    raise ValueError(f"Unsupported payout convention: {payout_convention}")
+
+
+def _compute_market_pricing_evaluation(
+    *,
+    model_name: str,
+    y_test: pd.Series,
+    model_probability_team1: np.ndarray,
+    market_frame: pd.DataFrame,
+    cfg: Mapping[str, Any],
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    team1_implied, team1_odds = _resolve_market_side_inputs(
+        market_frame,
+        odds_column=cfg.get("market_team1_odds_column"),
+        implied_prob_column=cfg.get("market_team1_implied_prob_column"),
+    )
+    team2_implied, team2_odds = _resolve_market_side_inputs(
+        market_frame,
+        odds_column=cfg.get("market_team2_odds_column"),
+        implied_prob_column=cfg.get("market_team2_implied_prob_column"),
+    )
+
+    proba_team1 = pd.Series(model_probability_team1, index=y_test.index, dtype=float)
+    proba_team2 = 1.0 - proba_team1
+    outcome_team1 = y_test.astype(int)
+    outcome_team2 = 1 - outcome_team1
+
+    per_side = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "model": model_name,
+                    "match_index": y_test.index,
+                    "side": "team1",
+                    "model_probability": proba_team1,
+                    "market_implied_probability": team1_implied,
+                    "market_odds": team1_odds,
+                    "actual_outcome": outcome_team1,
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "model": model_name,
+                    "match_index": y_test.index,
+                    "side": "team2",
+                    "model_probability": proba_team2,
+                    "market_implied_probability": team2_implied,
+                    "market_odds": team2_odds,
+                    "actual_outcome": outcome_team2,
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    valid = per_side["market_implied_probability"].between(0.0, 1.0) & (per_side["market_odds"] > 0.0)
+    per_side = per_side[valid].copy()
+    if per_side.empty:
+        return pd.DataFrame(), {"model": model_name, "status": "skipped_no_valid_market_rows"}
+
+    per_side["probability_delta_model_minus_market"] = per_side["model_probability"] - per_side["market_implied_probability"]
+    per_side["absolute_probability_error_vs_market"] = per_side["probability_delta_model_minus_market"].abs()
+    per_side["expected_value"] = _compute_expected_value(
+        per_side["model_probability"], per_side["market_odds"], payout_convention=str(cfg["market_payout_convention"])
+    )
+    per_side["realized_return"] = _compute_realized_return(
+        per_side["actual_outcome"], per_side["market_odds"], payout_convention=str(cfg["market_payout_convention"])
+    )
+    per_side["bet_signal"] = per_side["probability_delta_model_minus_market"] > 0.0
+    per_side["realized_return_if_bet"] = np.where(per_side["bet_signal"], per_side["realized_return"], 0.0)
+
+    ranked = per_side["probability_delta_model_minus_market"].rank(method="first")
+    per_side["edge_bucket"] = pd.qcut(
+        ranked,
+        q=min(int(cfg["market_edge_bucket_count"]), int(len(per_side))),
+        labels=False,
+        duplicates="drop",
+    )
+    per_side["edge_bucket"] = per_side["edge_bucket"].astype(int)
+
+    bucket_summary = (
+        per_side.groupby("edge_bucket", as_index=False)
+        .agg(
+            side_count=("side", "size"),
+            bet_count=("bet_signal", "sum"),
+            avg_edge=("probability_delta_model_minus_market", "mean"),
+            avg_expected_value=("expected_value", "mean"),
+            realized_roi_if_bet=("realized_return_if_bet", "mean"),
+        )
+        .sort_values(by="edge_bucket", kind="stable")
+    )
+
+    summary = {
+        "model": model_name,
+        "rows_evaluated": int(len(per_side)),
+        "mean_probability_delta_model_minus_market": float(per_side["probability_delta_model_minus_market"].mean()),
+        "mean_abs_probability_error_vs_market": float(per_side["absolute_probability_error_vs_market"].mean()),
+        "mean_expected_value": float(per_side["expected_value"].mean()),
+        "mean_realized_roi_if_bet": float(per_side["realized_return_if_bet"].mean()),
+        "bet_rate": float(per_side["bet_signal"].mean()),
+        "edge_bucket_roi": bucket_summary.to_dict(orient="records"),
+    }
+    return per_side, summary
 
 
 def _print_leakage_debug_info(x: pd.DataFrame, y: pd.Series, *, target_column: str) -> None:
@@ -218,8 +384,20 @@ def run_model_training_experiments(
     output_path = Path(output_dir) / cfg["output_subdir"]
     output_path.mkdir(parents=True, exist_ok=True)
 
-    feature_columns = [c for c in df.columns if c not in set(cfg["id_columns"]) and c != target_column]
-    model_df = df.loc[:, [*feature_columns, target_column]].copy(deep=True)
+    market_config_columns = [
+        cfg.get("market_team1_odds_column"),
+        cfg.get("market_team2_odds_column"),
+        cfg.get("market_team1_implied_prob_column"),
+        cfg.get("market_team2_implied_prob_column"),
+    ]
+    market_columns = {str(c) for c in market_config_columns if isinstance(c, str) and c in df.columns}
+    feature_columns = [
+        c
+        for c in df.columns
+        if c not in set(cfg["id_columns"]) and c != target_column and c not in market_columns
+    ]
+    selected_columns = [*feature_columns, *sorted(market_columns), target_column]
+    model_df = df.loc[:, selected_columns].copy(deep=True)
     model_df = model_df.dropna(subset=[target_column]).reset_index(drop=True)
 
     y = model_df[target_column].astype(int)
@@ -228,6 +406,9 @@ def run_model_training_experiments(
         _print_leakage_debug_info(x, y, target_column=target_column)
 
     split_df = x.copy(deep=True)
+    market_eval_columns = sorted(market_columns)
+    if market_eval_columns:
+        split_df[market_eval_columns] = model_df.loc[:, market_eval_columns]
     split_df[target_column] = y
     train_df, val_df, test_df = _temporal_split(
         split_df,
@@ -239,6 +420,12 @@ def run_model_training_experiments(
     x_train, y_train = train_df.drop(columns=[target_column]), train_df[target_column].astype(int)
     x_val, y_val = val_df.drop(columns=[target_column]), val_df[target_column].astype(int)
     x_test, y_test = test_df.drop(columns=[target_column]), test_df[target_column].astype(int)
+    test_market_frame = x_test.loc[:, market_eval_columns].copy(deep=True) if market_eval_columns else pd.DataFrame(index=x_test.index)
+
+    if market_eval_columns:
+        x_train = x_train.drop(columns=market_eval_columns, errors="ignore")
+        x_val = x_val.drop(columns=market_eval_columns, errors="ignore")
+        x_test = x_test.drop(columns=market_eval_columns, errors="ignore")
 
     numeric_columns = x_train.select_dtypes(include=[np.number, "bool"]).columns.tolist()
     categorical_columns = [c for c in x_train.columns if c not in set(numeric_columns)]
@@ -353,6 +540,8 @@ def run_model_training_experiments(
     curve_rows: list[dict[str, float]] = []
     summary_rows: list[dict[str, Any]] = []
     calibration_rows: list[dict[str, Any]] = []
+    market_pricing_rows: list[dict[str, Any]] = []
+    market_summary_rows: list[dict[str, Any]] = []
 
     plt.figure(figsize=(12, 8))
     for idx, (model_name, factory) in enumerate(model_specs.items(), start=1):
@@ -433,6 +622,17 @@ def run_model_training_experiments(
             f"test_auc={test_roc_auc:.4f} test_log_loss={test_log_loss:.4f} "
             f"test_brier={test_brier_score:.4f} test_ece10={test_ece_10_bins:.4f}"
         )
+        if market_eval_columns:
+            pricing_df, pricing_summary = _compute_market_pricing_evaluation(
+                model_name=model_name,
+                y_test=y_test.reset_index(drop=True),
+                model_probability_team1=clipped_test_proba,
+                market_frame=test_market_frame.reset_index(drop=True),
+                cfg=cfg,
+            )
+            if not pricing_df.empty:
+                market_pricing_rows.extend(pricing_df.to_dict(orient="records"))
+            market_summary_rows.append(pricing_summary)
 
         plt.subplot(2, 2, idx)
         plt.plot([r["depth"] for r in curves], [r["train_accuracy"] for r in curves], marker="o", label="Train")
@@ -462,6 +662,10 @@ def run_model_training_experiments(
     pd.DataFrame(calibration_rows).sort_values(by=["model", "bin_index"], kind="stable").to_csv(
         output_path / "model_calibration_table.csv", index=False
     )
+    if market_pricing_rows:
+        pd.DataFrame(market_pricing_rows).sort_values(by=["model", "match_index", "side"], kind="stable").to_csv(
+            output_path / "market_pricing_evaluation.csv", index=False
+        )
 
     manifest = {
         "configuration": {
@@ -486,6 +690,13 @@ def run_model_training_experiments(
             "feature_count": int(len(feature_columns)),
         },
         "models": summary_rows,
+        "market_pricing_evaluation": {
+            "enabled": bool(market_eval_columns),
+            "market_columns": market_eval_columns,
+            "payout_convention": cfg["market_payout_convention"],
+            "edge_bucket_count": cfg["market_edge_bucket_count"],
+            "models": market_summary_rows,
+        },
         "artifacts": {
             "depth_curve_csv": str(output_path / "depth_accuracy_curves.csv"),
             "summary_csv": str(output_path / "model_summary_metrics.csv"),
@@ -494,6 +705,8 @@ def run_model_training_experiments(
             "roc_curve_plots": [str(output_path / f"roc_curve__{name}.png") for name in model_specs],
         },
     }
+    if market_pricing_rows:
+        manifest["artifacts"]["market_pricing_evaluation_csv"] = str(output_path / "market_pricing_evaluation.csv")
     (output_path / "model_training_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     plt.tight_layout()
