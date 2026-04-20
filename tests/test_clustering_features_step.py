@@ -1,5 +1,8 @@
 import importlib
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 
@@ -44,6 +47,48 @@ class ClusteringFeatureStepTests(unittest.TestCase):
         out = step.run(df, config={"method": "both", "fit_scope": "all_data", "kmeans_n_clusters": 2, "dbscan_min_samples": 1})
         self.assertIn("cluster_kmeans_id", out.columns)
         self.assertIn("cluster_dbscan_id", out.columns)
+
+    def test_auto_tuning_writes_artifact_and_plots(self) -> None:
+        df = self._sample_df()
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "cluster_artifact.json"
+            plot_dir = Path(tmp) / "plots"
+            out = step.run(
+                df,
+                config={
+                    "method": "both",
+                    "fit_scope": "all_data",
+                    "train_fraction": 0.5,
+                    "tuning_artifact_path": str(artifact_path),
+                    "tuning_plot_dir": str(plot_dir),
+                    "dbscan_tuning_min_samples": [1, 2],
+                },
+            )
+            self.assertIn("cluster_kmeans_id", out.columns)
+            self.assertIn("cluster_dbscan_id", out.columns)
+            self.assertTrue(artifact_path.exists())
+            self.assertTrue((plot_dir / "clustering_tuning_kmeans.png").exists())
+            self.assertTrue((plot_dir / "clustering_tuning_dbscan.png").exists())
+
+    def test_existing_artifact_skips_tuning(self) -> None:
+        df = self._sample_df()
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "cluster_artifact.json"
+            plot_dir = Path(tmp) / "plots"
+            base_config = {
+                "method": "both",
+                "fit_scope": "all_data",
+                "train_fraction": 0.5,
+                "tuning_artifact_path": str(artifact_path),
+                "tuning_plot_dir": str(plot_dir),
+                "dbscan_tuning_min_samples": [1, 2],
+            }
+            _ = step.run(df, config=base_config)
+            with mock.patch.object(step, "_tune_kmeans", side_effect=AssertionError("kmeans retuned unexpectedly")):
+                with mock.patch.object(step, "_tune_dbscan", side_effect=AssertionError("dbscan retuned unexpectedly")):
+                    out = step.run(df, config=base_config)
+            self.assertIn("cluster_kmeans_id", out.columns)
+            self.assertIn("cluster_dbscan_id", out.columns)
 
 
 if __name__ == "__main__":
