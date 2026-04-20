@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from tennis_pipeline.experiments.model_training import (
+    _compute_market_pricing_evaluation,
     run_feature_set_training_experiment,
     run_model_training_experiments,
 )
@@ -62,6 +63,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
 
             self.assertIn("models", manifest)
             self.assertEqual(3, len(manifest["models"]))
+            self.assertNotIn("market_pricing_evaluation_csv", manifest.get("artifacts", {}))
 
     def test_debug_leakage_prints_suspicious_and_near_copy_features(self) -> None:
         rows = []
@@ -158,6 +160,87 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             artifacts = manifests["structured_only"].get("artifacts", {})
             self.assertIn("feature_set_pricing_metric_comparison_csv", artifacts)
             self.assertIn("feature_set_pricing_metric_comparison_plot", artifacts)
+
+    def test_market_pricing_evaluation_metrics_from_synthetic_inputs(self) -> None:
+        y_test = pd.Series([1, 0, 1, 0], dtype=int)
+        model_prob_team1 = [0.60, 0.45, 0.70, 0.30]
+        market_frame = pd.DataFrame(
+            {
+                "t1_odds": [1.90, 2.20, 1.70, 2.80],
+                "t2_odds": [2.00, 1.75, 2.25, 1.50],
+            }
+        )
+        pricing_df, summary = _compute_market_pricing_evaluation(
+            model_name="decision_tree",
+            y_test=y_test,
+            model_probability_team1=model_prob_team1,
+            market_frame=market_frame,
+            cfg={
+                "market_team1_odds_column": "t1_odds",
+                "market_team2_odds_column": "t2_odds",
+                "market_team1_implied_prob_column": None,
+                "market_team2_implied_prob_column": None,
+                "market_payout_convention": "decimal",
+                "market_edge_bucket_count": 4,
+            },
+        )
+
+        self.assertFalse(pricing_df.empty)
+        self.assertEqual(8, len(pricing_df))
+        team1_row = pricing_df[(pricing_df["match_index"] == 0) & (pricing_df["side"] == "team1")].iloc[0]
+        self.assertAlmostEqual(0.60 * 1.90 - 1.0, team1_row["expected_value"], places=8)
+        self.assertAlmostEqual(1.90 - 1.0, team1_row["realized_return"], places=8)
+        self.assertIn("edge_bucket_roi", summary)
+        self.assertGreaterEqual(len(summary["edge_bucket_roi"]), 2)
+
+    def test_training_with_market_columns_creates_artifact_and_manifest_summary(self) -> None:
+        rows = []
+        for i in range(90):
+            rows.append(
+                {
+                    "event_id": f"e{i//3}",
+                    "match_id": f"m{i}",
+                    "match_date": f"2024-03-{(i % 28) + 1:02d}",
+                    "match_seq": i,
+                    "team1_player_id": f"p{i}",
+                    "team2_player_id": f"q{i}",
+                    "surface_context": "Clay" if i % 2 == 0 else "Hard",
+                    "rank_diff": (i % 17) - 8,
+                    "elo_diff_team1": (i % 31) - 15,
+                    "market_team1_odds": 1.70 + (i % 5) * 0.1,
+                    "market_team2_odds": 1.65 + ((i + 2) % 5) * 0.1,
+                    "team1_wins": 1 if i % 4 in (1, 2) else 0,
+                }
+            )
+
+        df = pd.DataFrame(rows)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest = run_model_training_experiments(
+                df,
+                output_dir=tmpdir,
+                config={
+                    "depth_values": [2],
+                    "rf_n_estimators": 20,
+                    "gbdt_n_estimators": 20,
+                    "market_team1_odds_column": "market_team1_odds",
+                    "market_team2_odds_column": "market_team2_odds",
+                    "market_edge_bucket_count": 5,
+                },
+            )
+            artifact_dir = Path(tmpdir) / "model_training"
+            market_eval_path = artifact_dir / "market_pricing_evaluation.csv"
+
+            self.assertTrue(market_eval_path.exists())
+            market_df = pd.read_csv(market_eval_path)
+            self.assertIn("expected_value", market_df.columns)
+            self.assertIn("probability_delta_model_minus_market", market_df.columns)
+            self.assertIn("edge_bucket", market_df.columns)
+
+            market_summary = manifest.get("market_pricing_evaluation", {})
+            self.assertTrue(market_summary.get("enabled"))
+            self.assertEqual("decimal", market_summary.get("payout_convention"))
+            self.assertEqual(3, len(market_summary.get("models", [])))
+            self.assertIn("market_pricing_evaluation_csv", manifest.get("artifacts", {}))
 
 
 if __name__ == "__main__":
