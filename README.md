@@ -281,7 +281,16 @@ For each model, it trains with fixed defaults (no depth/hyperparameter sweep) an
 - `roc_curve__decision_tree.png`
 - `roc_curve__random_forest.png`
 - `roc_curve__gbdt.png`
+- `match_probability_predictions.csv` (per-match probabilities and outcomes)
 - `model_training_manifest.json`
+
+`match_probability_predictions.csv` probability orientation:
+
+- `prob_team1_victory` = model probability that Team1 wins (`team1_wins = 1`).
+- `prob_team2_victory` = `1 - prob_team1_victory`.
+- Team mapping comes from row ID columns:
+  - Team1 ID: `team1_player_id`
+  - Team2 ID: `team2_player_id`
 
 When running feature-set experiments (`--run-feature-set-experiment`), the cross-run summary now defaults to **pricing-oriented probabilistic metrics**:
 

@@ -9,9 +9,26 @@ import pandas as pd
 
 from tennis_pipeline.experiments.model_training import (
     _compute_market_pricing_evaluation,
+    _validate_side_probabilities,
     run_feature_set_training_experiment,
     run_model_training_experiments,
 )
+
+
+class ProbabilityValidationTests(unittest.TestCase):
+    def test_validate_side_probabilities_rejects_non_numeric_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "non-numeric"):
+            _validate_side_probabilities(
+                prob_team1=pd.Series([0.2, "not-a-number"]),
+                prob_team2=pd.Series([0.8, 0.2]),
+            )
+
+    def test_validate_side_probabilities_rejects_non_complementary_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "do not sum to 1"):
+            _validate_side_probabilities(
+                prob_team1=pd.Series([0.55, 0.61]),
+                prob_team2=pd.Series([0.45, 0.38]),
+            )
 
 
 @unittest.skipUnless(
@@ -68,11 +85,16 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
                     "team1_player_id",
                     "team2_player_id",
                     "model_name",
-                    "prob_team1_win",
+                    "prob_team1_victory",
+                    "prob_team2_victory",
                     "predicted_label_team1_win",
                     "actual_team1_win",
                 }.issubset(set(predictions_df.columns))
             )
+            self.assertTrue(pd.api.types.is_numeric_dtype(predictions_df["prob_team1_victory"]))
+            self.assertTrue(pd.api.types.is_numeric_dtype(predictions_df["prob_team2_victory"]))
+            complementary = predictions_df["prob_team1_victory"] + predictions_df["prob_team2_victory"]
+            self.assertTrue(((complementary - 1.0).abs() <= 1e-6).all())
 
             for name in ("decision_tree", "random_forest", "gbdt"):
                 self.assertTrue((artifact_dir / f"roc_curve__{name}.png").exists())
