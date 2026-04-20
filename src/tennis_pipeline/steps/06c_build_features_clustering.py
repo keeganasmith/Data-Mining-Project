@@ -15,6 +15,7 @@ Notes on leakage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Mapping
@@ -37,6 +38,67 @@ _METHODS = {"kmeans", "dbscan", "both"}
 _FIT_SCOPES = {"train_only", "all_data"}
 _PARALLEL_BACKENDS = {"loky", "threading"}
 _TUNING_PROFILES = {"fast", "full"}
+
+
+def _stable_hash_payload(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _summary_stats_hash(df: pd.DataFrame, cols: list[str]) -> str:
+    if not cols:
+        return _stable_hash_payload({"columns": []})
+    matrix = df.loc[:, cols].apply(pd.to_numeric, errors="coerce")
+    summary: dict[str, dict[str, float | int]] = {}
+    for col in cols:
+        series = matrix[col]
+        non_null = series.dropna()
+        summary[col] = {
+            "non_null_count": int(non_null.shape[0]),
+            "null_count": int(series.isna().sum()),
+            "mean": float(non_null.mean()) if not non_null.empty else 0.0,
+            "std": float(non_null.std(ddof=0)) if not non_null.empty else 0.0,
+            "min": float(non_null.min()) if not non_null.empty else 0.0,
+            "median": float(non_null.median()) if not non_null.empty else 0.0,
+            "max": float(non_null.max()) if not non_null.empty else 0.0,
+        }
+    return _stable_hash_payload(summary)
+
+
+def _tuning_fingerprint(df: pd.DataFrame, source_cols: list[str], cfg: Mapping[str, Any], tuning_profile: str) -> dict[str, Any]:
+    upstream_checksum = None
+    for key in ("input_file_checksum", "input_checksum", "source_checksum", "upstream_checksum"):
+        value = cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            upstream_checksum = value.strip()
+            break
+
+    relevant_config = {
+        "method": str(cfg["method"]),
+        "fit_scope": str(cfg["fit_scope"]),
+        "train_fraction": float(cfg["train_fraction"]),
+        "source_feature_prefixes": list(cfg["source_feature_prefixes"]),
+        "tuning_profile": str(tuning_profile),
+        "kmeans_tuning_n_clusters": [int(v) for v in cfg["kmeans_tuning_n_clusters"]],
+        "dbscan_tuning_eps": [float(v) for v in cfg["dbscan_tuning_eps"]],
+        "dbscan_tuning_min_samples": [int(v) for v in cfg["dbscan_tuning_min_samples"]],
+        "dbscan_stage1_sample_size": int(cfg["dbscan_stage1_sample_size"]),
+        "dbscan_stage2_sample_size": int(cfg["dbscan_stage2_sample_size"]),
+        "dbscan_top_n": int(cfg["dbscan_top_n"]),
+        "tuning_score_sample_size": int(cfg["tuning_score_sample_size"]),
+        "tuning_score_random_state": int(cfg["tuning_score_random_state"]),
+    }
+
+    fingerprint: dict[str, Any] = {
+        "row_count": int(len(df)),
+        "selected_source_columns": list(source_cols),
+        "relevant_tuning_config": relevant_config,
+        "summary_stats_hash": _summary_stats_hash(df, source_cols),
+    }
+    if upstream_checksum is not None:
+        fingerprint["input_checksum"] = upstream_checksum
+    fingerprint["fingerprint_hash"] = _stable_hash_payload(fingerprint)
+    return fingerprint
 
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -67,6 +129,28 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     auto_tune = normalized.get("auto_tune")
     if not isinstance(auto_tune, bool):
         raise TypeError("config['auto_tune'] must be a bool")
+
+    auto_tune_train_only_max_rows = normalized.get("auto_tune_train_only_max_rows")
+    if not isinstance(auto_tune_train_only_max_rows, int):
+        raise TypeError("config['auto_tune_train_only_max_rows'] must be an int")
+    if auto_tune_train_only_max_rows < 1:
+        raise ValueError("config['auto_tune_train_only_max_rows'] must be >= 1")
+
+    allow_auto_tune_all_data_override = normalized.get("allow_auto_tune_all_data_override")
+    if not isinstance(allow_auto_tune_all_data_override, bool):
+        raise TypeError("config['allow_auto_tune_all_data_override'] must be a bool")
+
+    if (
+        row_count is not None
+        and bool(auto_tune)
+        and int(row_count) > int(auto_tune_train_only_max_rows)
+        and fit_scope == "all_data"
+        and not bool(allow_auto_tune_all_data_override)
+    ):
+        raise ValueError(
+            "config safeguard: auto_tune with row_count above auto_tune_train_only_max_rows "
+            "requires fit_scope='train_only' unless allow_auto_tune_all_data_override=True"
+        )
 
     tuning_profile = normalized.get("tuning_profile")
     if tuning_profile not in _TUNING_PROFILES:
@@ -623,8 +707,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     if not isinstance(df_or_path, pd.DataFrame):
         raise TypeError("06c_build_features_clustering.run expects a pandas DataFrame input")
 
-    cfg = _normalize_config(config)
     out = df_or_path.copy(deep=True)
+    cfg = _normalize_config(config, row_count=len(out))
     tuning_profile = _resolve_tuning_profile(cfg, row_count=len(out), user_config=config)
     tuned_cfg = _apply_tuning_profile(cfg, tuning_profile)
 
@@ -654,9 +738,13 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     artifact_path = Path(str(tuned_cfg["tuning_artifact_path"]))
     plot_dir = Path(str(tuned_cfg["tuning_plot_dir"]))
+    expected_fingerprint = _tuning_fingerprint(out, source_cols, tuned_cfg, tuning_profile)
     artifact = _load_tuning_artifact(artifact_path) if bool(tuned_cfg["auto_tune"]) else None
-    if isinstance(artifact, dict) and artifact.get("tuning_profile") != tuning_profile:
+    artifact_fingerprint = artifact.get("fingerprint") if isinstance(artifact, dict) else None
+    fingerprint_match = isinstance(artifact_fingerprint, dict) and artifact_fingerprint == expected_fingerprint
+    if not fingerprint_match:
         artifact = None
+
     artifact_kmeans = artifact.get("kmeans") if isinstance(artifact, dict) else None
     artifact_dbscan = artifact.get("dbscan") if isinstance(artifact, dict) else None
     kmeans_choice: dict[str, Any] | None = None
@@ -709,6 +797,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
 
     if bool(tuned_cfg["auto_tune"]) and artifact is None:
         artifact_payload: dict[str, Any] = {
+            "fingerprint": expected_fingerprint,
             "selected_source_columns": source_cols,
             "method": method,
             "fit_scope": tuned_cfg["fit_scope"],

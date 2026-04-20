@@ -128,6 +128,33 @@ class ClusteringFeatureStepTests(unittest.TestCase):
             self.assertTrue(artifact_payload["dbscan_tuning_metadata"]["stopped_early"])
             self.assertGreater(artifact_payload["kmeans_tuning_metadata"]["elapsed_seconds"], 0.0)
             self.assertGreater(artifact_payload["dbscan_tuning_metadata"]["elapsed_seconds"], 0.0)
+    def test_large_auto_tune_all_data_requires_override(self) -> None:
+        df = self._sample_df()
+        with self.assertRaisesRegex(ValueError, "requires fit_scope='train_only'"):
+            step.run(
+                df,
+                config={
+                    "method": "kmeans",
+                    "fit_scope": "all_data",
+                    "auto_tune": True,
+                    "auto_tune_train_only_max_rows": 2,
+                    "kmeans_n_clusters": 2,
+                },
+            )
+
+    def test_large_auto_tune_all_data_with_override_runs(self) -> None:
+        df = self._sample_df()
+        out = step.run(
+            df,
+            config={
+                "method": "kmeans",
+                "fit_scope": "all_data",
+                "auto_tune": True,
+                "auto_tune_train_only_max_rows": 2,
+                "allow_auto_tune_all_data_override": True,
+            },
+        )
+        self.assertIn("cluster_kmeans_id", out.columns)
 
 
 if __name__ == "__main__":
