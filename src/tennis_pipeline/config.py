@@ -65,6 +65,10 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "tuning_artifact_path": "data/processed/clustering_tuning_artifact.json",
     # Optional output directory for tuning summary plots.
     "tuning_plot_dir": "data/processed",
+    # Maximum number of rows used when scoring clustering candidates during tuning.
+    "tuning_score_sample_size": 10000,
+    # Fixed seed for deterministic tuning-score subsampling.
+    "tuning_score_random_state": 42,
     # Parallel worker count used by clustering tuning/search helpers.
     # -1 means use all available cores.
     "parallel_n_jobs": -1,
