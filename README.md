@@ -80,8 +80,8 @@ python -m tennis_pipeline.cli.run_pipeline \
 
 - `--run-feature-set-experiment` (flag)
   - Runs fixed-hyperparameter training across two feature-set variants:
-    - structured_only
-    - structured_plus_elo
+    - data_only
+    - data_plus_temporal_elo_clustering
   - This flag does not require anomaly features.
 
 ---
@@ -233,8 +233,8 @@ The runner can automatically generate multiple experiment tables from the final 
 
 By default (`experiments.enabled: true`), it writes:
 
-- `<output-dir>/processed/experiments/model_table__structured_only.parquet`
-- `<output-dir>/processed/experiments/model_table__structured_plus_elo.parquet`
+- `<output-dir>/processed/experiments/model_table__data_only.parquet`
+- `<output-dir>/processed/experiments/model_table__data_plus_temporal_elo_clustering.parquet`
 - `<output-dir>/processed/experiments/feature_set_manifest.json`
 
 Each output includes:
@@ -266,8 +266,8 @@ Create `pipeline_config.json`:
     "metadata_column": "feature_set_name",
     "target_column": "team1_wins",
     "feature_sets": [
-      {"name": "structured_only", "include_elo": false},
-      {"name": "structured_plus_elo", "include_elo": true}
+      {"name": "data_only", "include_elo": false, "include_temporal": false, "include_clustering": false},
+      {"name": "data_plus_temporal_elo_clustering", "include_elo": true, "include_temporal": true, "include_clustering": true}
     ]
   }
 }
@@ -314,12 +314,12 @@ For each model, it trains with fixed defaults (no depth/hyperparameter sweep) an
   - Team1 ID: `team1_player_id`
   - Team2 ID: `team2_player_id`
 
-When running feature-set experiments (`--run-feature-set-experiment`), the cross-run summary now defaults to **pricing-oriented probabilistic metrics**:
+When running feature-set experiments (`--run-feature-set-experiment`), the cross-run summary now defaults to **probability-quality metrics**:
 
-- `feature_set_pricing_metric_comparison.csv`
-- `feature_set_pricing_metric_comparison.png`
+- `feature_set_probability_metric_comparison.csv`
+- `feature_set_probability_metric_comparison.png`
 
-This default is intentional for market pricing workflows. Book/price construction depends on reliable class probabilities (well-calibrated confidence), not just hard win/loss labels. A model can post similar or even better test accuracy while still producing worse implied probabilities; log loss, Brier score, and ECE directly measure this risk.
+The comparison plot includes log loss, Brier score, ECE, and ROC-AUC so you can judge not only classification separation, but also how trustworthy the predicted match probabilities are.
 
 All artifacts are written under:
 
