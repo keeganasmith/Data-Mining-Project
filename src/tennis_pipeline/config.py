@@ -74,6 +74,8 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "tuning_score_sample_size": 10000,
     # Fixed seed for deterministic tuning-score subsampling.
     "tuning_score_random_state": 42,
+    # Global wall-clock budget for each clustering tuner (seconds).
+    "tuning_time_budget_seconds": 1800,
     # Parallel worker count used by clustering tuning/search helpers.
     # -1 means use all available cores.
     "parallel_n_jobs": -1,
