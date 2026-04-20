@@ -55,8 +55,24 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             artifact_dir = Path(tmpdir) / "model_training"
             self.assertTrue((artifact_dir / "depth_accuracy_curves.csv").exists())
             self.assertTrue((artifact_dir / "model_summary_metrics.csv").exists())
+            self.assertTrue((artifact_dir / "match_probability_predictions.csv").exists())
             self.assertTrue((artifact_dir / "depth_accuracy_curves.png").exists())
             self.assertTrue((artifact_dir / "model_training_manifest.json").exists())
+            predictions_df = pd.read_csv(artifact_dir / "match_probability_predictions.csv")
+            self.assertTrue(
+                {
+                    "event_id",
+                    "match_id",
+                    "match_date",
+                    "match_seq",
+                    "team1_player_id",
+                    "team2_player_id",
+                    "model_name",
+                    "prob_team1_win",
+                    "predicted_label_team1_win",
+                    "actual_team1_win",
+                }.issubset(set(predictions_df.columns))
+            )
 
             for name in ("decision_tree", "random_forest", "gbdt"):
                 self.assertTrue((artifact_dir / f"roc_curve__{name}.png").exists())
@@ -64,6 +80,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             self.assertIn("models", manifest)
             self.assertEqual(3, len(manifest["models"]))
             self.assertNotIn("market_pricing_evaluation_csv", manifest.get("artifacts", {}))
+            self.assertIn("match_probability_predictions_csv", manifest.get("artifacts", {}))
 
     def test_debug_leakage_prints_suspicious_and_near_copy_features(self) -> None:
         rows = []

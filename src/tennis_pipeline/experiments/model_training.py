@@ -396,7 +396,8 @@ def run_model_training_experiments(
         for c in df.columns
         if c not in set(cfg["id_columns"]) and c != target_column and c not in market_columns
     ]
-    selected_columns = [*feature_columns, *sorted(market_columns), target_column]
+    available_id_columns = [column for column in cfg["id_columns"] if column in df.columns]
+    selected_columns = [*available_id_columns, *feature_columns, *sorted(market_columns), target_column]
     model_df = df.loc[:, selected_columns].copy(deep=True)
     model_df = model_df.dropna(subset=[target_column]).reset_index(drop=True)
 
@@ -421,11 +422,17 @@ def run_model_training_experiments(
     x_val, y_val = val_df.drop(columns=[target_column]), val_df[target_column].astype(int)
     x_test, y_test = test_df.drop(columns=[target_column]), test_df[target_column].astype(int)
     test_market_frame = x_test.loc[:, market_eval_columns].copy(deep=True) if market_eval_columns else pd.DataFrame(index=x_test.index)
+    val_identifiers = x_val.loc[:, available_id_columns].copy(deep=True) if available_id_columns else pd.DataFrame(index=x_val.index)
+    test_identifiers = x_test.loc[:, available_id_columns].copy(deep=True) if available_id_columns else pd.DataFrame(index=x_test.index)
 
     if market_eval_columns:
         x_train = x_train.drop(columns=market_eval_columns, errors="ignore")
         x_val = x_val.drop(columns=market_eval_columns, errors="ignore")
         x_test = x_test.drop(columns=market_eval_columns, errors="ignore")
+    if available_id_columns:
+        x_train = x_train.drop(columns=available_id_columns, errors="ignore")
+        x_val = x_val.drop(columns=available_id_columns, errors="ignore")
+        x_test = x_test.drop(columns=available_id_columns, errors="ignore")
 
     numeric_columns = x_train.select_dtypes(include=[np.number, "bool"]).columns.tolist()
     categorical_columns = [c for c in x_train.columns if c not in set(numeric_columns)]
@@ -542,6 +549,7 @@ def run_model_training_experiments(
     calibration_rows: list[dict[str, Any]] = []
     market_pricing_rows: list[dict[str, Any]] = []
     market_summary_rows: list[dict[str, Any]] = []
+    match_probability_prediction_rows: list[dict[str, Any]] = []
 
     plt.figure(figsize=(12, 8))
     for idx, (model_name, factory) in enumerate(model_specs.items(), start=1):
@@ -633,6 +641,21 @@ def run_model_training_experiments(
             if not pricing_df.empty:
                 market_pricing_rows.extend(pricing_df.to_dict(orient="records"))
             market_summary_rows.append(pricing_summary)
+        val_proba = np.clip(best_pipeline.predict_proba(x_val)[:, 1], 1e-15, 1.0 - 1e-15)
+        val_pred = best_pipeline.predict(x_val)
+        val_predictions = val_identifiers.reset_index(drop=True).copy(deep=True)
+        val_predictions["model_name"] = model_name
+        val_predictions["prob_team1_win"] = val_proba
+        val_predictions["predicted_label_team1_win"] = val_pred
+        val_predictions["actual_team1_win"] = y_val.reset_index(drop=True).astype(int)
+        match_probability_prediction_rows.extend(val_predictions.to_dict(orient="records"))
+
+        test_predictions = test_identifiers.reset_index(drop=True).copy(deep=True)
+        test_predictions["model_name"] = model_name
+        test_predictions["prob_team1_win"] = clipped_test_proba
+        test_predictions["predicted_label_team1_win"] = test_pred
+        test_predictions["actual_team1_win"] = y_test.reset_index(drop=True).astype(int)
+        match_probability_prediction_rows.extend(test_predictions.to_dict(orient="records"))
 
         plt.subplot(2, 2, idx)
         plt.plot([r["depth"] for r in curves], [r["train_accuracy"] for r in curves], marker="o", label="Train")
@@ -661,6 +684,10 @@ def run_model_training_experiments(
     )
     pd.DataFrame(calibration_rows).sort_values(by=["model", "bin_index"], kind="stable").to_csv(
         output_path / "model_calibration_table.csv", index=False
+    )
+    pd.DataFrame(match_probability_prediction_rows).to_csv(
+        output_path / "match_probability_predictions.csv",
+        index=False,
     )
     if market_pricing_rows:
         pd.DataFrame(market_pricing_rows).sort_values(by=["model", "match_index", "side"], kind="stable").to_csv(
@@ -701,6 +728,7 @@ def run_model_training_experiments(
             "depth_curve_csv": str(output_path / "depth_accuracy_curves.csv"),
             "summary_csv": str(output_path / "model_summary_metrics.csv"),
             "calibration_table_csv": str(output_path / "model_calibration_table.csv"),
+            "match_probability_predictions_csv": str(output_path / "match_probability_predictions.csv"),
             "depth_accuracy_plot": str(output_path / "depth_accuracy_curves.png"),
             "roc_curve_plots": [str(output_path / f"roc_curve__{name}.png") for name in model_specs],
         },
