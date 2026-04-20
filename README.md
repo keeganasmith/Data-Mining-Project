@@ -14,8 +14,7 @@ The runner executes the following steps in a fixed order:
 4. `04_split_roles`
 5. `05_build_features_static`
 6. `06_build_features_temporal_elo` (optional via `--use-elo`)
-7. `06b_build_features_anomaly_surface` (optional via `--use-anomaly`)
-8. `07_finalize_model_table`
+7. `07_finalize_model_table`
 
 For each executed step, the pipeline:
 
@@ -43,7 +42,6 @@ python -m tennis_pipeline.cli.run_pipeline \
   --output-dir <output-root> \
   [--config-path <json-or-yaml-config>] \
   [--use-elo] \
-  [--use-anomaly] \
   [--run-feature-set-experiment]
 ```
 
@@ -73,17 +71,12 @@ python -m tennis_pipeline.cli.run_pipeline \
     - `elo_team2_pre = 1500.0`
     - `elo_prob_team1_pre = 0.5`
 
-- `--use-anomaly` (flag)
-  - Enables step `06b_build_features_anomaly_surface`.
-  - If omitted, anomaly feature generation and anomaly artifact files are skipped.
 
 - `--run-feature-set-experiment` (flag)
-  - Runs fixed-hyperparameter training across these four feature-set variants:
-    - raw only
-    - raw + elo
-    - raw + anomaly
-    - raw + elo + anomaly
-  - This flag implies both `--use-elo` and `--use-anomaly`.
+  - Runs fixed-hyperparameter training across two feature-set variants:
+    - structured_only
+    - structured_plus_elo
+  - This flag does not require anomaly features.
 
 ---
 
@@ -194,35 +187,6 @@ Primary config keys:
 - `feature_prefix` (default `elo`)
 - `strict_validation` (default `True`)
 
-## Step 06b — `06b_build_features_anomaly_surface` (optional)
-
-Purpose:
-
-- Computes anomaly features from pre-match-safe columns, surface-aware.
-- Emits:
-  - `anomaly_score`
-  - `robust_z_anomaly_score`
-  - `knn_anomaly_score`
-  - `iforest_anomaly_score`
-  - `anomaly_flag`
-  - optionally `surface_anomaly_z`
-
-Artifact output behavior:
-
-- When `artifact_output_dir` is set, also writes:
-  - `anomaly_summary_by_surface.csv`
-  - `anomaly_top_rows.csv`
-  - `anomaly_summary.json`
-
-Primary config keys:
-
-- `feature_columns` (list[str])
-- `surface_column`
-- `emit_surface_anomaly_z`
-- `surface_z_threshold` / `anomaly_threshold`
-- `knn_neighbors`, `knn_reference_size`, `knn_chunk_size`
-- `artifact_output_dir`, `artifact_top_n`
-
 ## Step 07 — `07_finalize_model_table`
 
 Purpose:
@@ -235,7 +199,7 @@ Defaults include:
 
 - target column: `team1_wins`
 - ID columns: `event_id`, `match_id`, `match_date`, `match_seq`, `team1_player_id`, `team2_player_id`
-- preferred ordering for rank, Elo, anomaly, and context features
+- preferred ordering for rank, Elo, and context features
 
 ---
 
@@ -243,12 +207,12 @@ Defaults include:
 
 The runner can automatically generate multiple experiment tables from the final model table.
 
+> Note: anomaly detection was evaluated and then removed from the documented experiment set due to no measurable benefit.
+
 By default (`experiments.enabled: true`), it writes:
 
 - `<output-dir>/processed/experiments/model_table__structured_only.parquet`
-- `<output-dir>/processed/experiments/model_table__structured_plus_anomaly.parquet`
 - `<output-dir>/processed/experiments/model_table__structured_plus_elo.parquet`
-- `<output-dir>/processed/experiments/model_table__structured_plus_anomaly_plus_elo.parquet`
 - `<output-dir>/processed/experiments/feature_set_manifest.json`
 
 Each output includes:
@@ -258,14 +222,14 @@ Each output includes:
 - selected feature subset,
 - target (`team1_wins`).
 
-### Example: run full pipeline + experiments
+### Example: run pipeline + experiments
 
 ```bash
 PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
   --input-path data/csv_data/atp_2024.csv \
   --output-dir data \
   --use-elo \
-  --use-anomaly
+  --run-feature-set-experiment
 ```
 
 ### Example: custom experiment config
@@ -280,10 +244,8 @@ Create `pipeline_config.json`:
     "metadata_column": "feature_set_name",
     "target_column": "team1_wins",
     "feature_sets": [
-      {"name": "baseline", "include_elo": false, "include_anomaly": false},
-      {"name": "elo_only", "include_elo": true, "include_anomaly": false},
-      {"name": "anomaly_only", "include_elo": false, "include_anomaly": true},
-      {"name": "full", "include_elo": true, "include_anomaly": true}
+      {"name": "structured_only", "include_elo": false},
+      {"name": "structured_plus_elo", "include_elo": true}
     ]
   }
 }
@@ -297,7 +259,7 @@ PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
   --output-dir data \
   --config-path pipeline_config.json \
   --use-elo \
-  --use-anomaly
+  --run-feature-set-experiment
 ```
 
 ---
@@ -393,29 +355,12 @@ for entry in manifest["feature_sets"]:
 PY
 ```
 
-## D) Inspect anomaly artifacts (when `--use-anomaly` enabled)
-
-```bash
-python - <<'PY'
-import json
-import pandas as pd
-
-summary = json.load(open("data/artifacts/06b_build_features_anomaly_surface/anomaly_summary.json"))
-print(summary)
-
-print("\nTop anomalies:")
-print(pd.read_csv("data/artifacts/06b_build_features_anomaly_surface/anomaly_top_rows.csv").head(10))
-
-print("\nSurface summary:")
-print(pd.read_csv("data/artifacts/06b_build_features_anomaly_surface/anomaly_summary_by_surface.csv"))
-PY
-```
 
 ---
 
 ## 6) Practical run patterns
 
-## Quick baseline run (no Elo/anomaly)
+## Quick baseline run (structured_only)
 
 ```bash
 PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
@@ -432,19 +377,10 @@ PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
   --use-elo
 ```
 
-## Elo + anomaly run (most complete)
-
-```bash
-PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
-  --input-path data/csv_data/atp_2024.csv \
-  --output-dir data \
-  --use-elo \
-  --use-anomaly
-```
 
 ## Reproducibility tips
 
-- Keep `random_seed` fixed (step 04 and anomaly step options).
+- Keep `random_seed` fixed (step 04 options).
 - Keep `k_factor`, `initial_rating`, and `rating_scale` fixed for Elo comparability.
 - Keep experiment config and feature-set names stable between runs.
 
@@ -454,6 +390,6 @@ PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
 
 - Step-to-notebook mapping: `docs/pipeline_mapping.md`
 - Pipeline runner and CLI flags: `src/tennis_pipeline/cli/run_pipeline.py`
-- Default pipeline and anomaly/Elo/experiment configs: `src/tennis_pipeline/config.py`
+- Default pipeline and Elo/experiment configs: `src/tennis_pipeline/config.py`
 - Experiment feature-set materialization logic: `src/tennis_pipeline/experiments/feature_sets.py`
 - Stage implementations: `src/tennis_pipeline/steps/`
