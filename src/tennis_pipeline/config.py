@@ -32,25 +32,4 @@ PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "experiments": DEFAULT_EXPERIMENT_CONFIG,
     # Includes optional `profile` (e.g. "fast") for low-cost training diagnostics.
     "model_training": DEFAULT_MODEL_TRAINING_CONFIG,
-    "06b_build_features_anomaly_surface": {
-        "feature_columns": [
-            "rank_diff",
-            "abs_rank_diff",
-            "race_rank_diff",
-            "abs_race_rank_diff",
-            "elo_diff_team1",
-            "elo_prob_team1_pre",
-            "team1_sgl_roll_rank",
-            "team2_sgl_roll_rank",
-        ],
-        "contamination": 0.05,
-        "random_state": 42,
-        # When True, anomaly z-scores are normalized within each surface.
-        "emit_surface_anomaly_z": True,
-        "knn_neighbors": 10,
-        "knn_reference_size": 5000,
-        "knn_chunk_size": 2048,
-        "artifact_output_dir": "./outputs/anomaly.txt",
-        "artifact_top_n": 25,
-    },
 }

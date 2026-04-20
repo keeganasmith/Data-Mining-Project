@@ -22,16 +22,10 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "elo_team2_pre",
         "elo_diff_team1",
         "elo_prob_team1_pre",
-        "anomaly_score",
-        "robust_z_anomaly_score",
-        "knn_anomaly_score",
-        "iforest_anomaly_score",
-        "anomaly_flag",
-        "surface_anomaly_z",
         "surface_context",
         "court_context",
     ],
-    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_", "anom_"],
+    "feature_prefixes": ["diff_", "abs_diff_", "same_", "elo_"],
     "drop_columns": [
         "winner_player_id",
         "loser_player_id",
@@ -51,11 +45,6 @@ _LEAKAGE_PATTERN = re.compile(
     r"breakpoints|returnpointswon|servicepointswon|totalpointswon|aces|doublefaults|sets[_\.\[])",
     flags=re.IGNORECASE,
 )
-_ANOMALY_SAFE_EXACT = {"anomaly_score", "anomaly_flag", "surface_anomaly_z"}
-_ANOMALY_SAFE_PREFIXES = ("anom_",)
-_ANOMALY_SAFE_TOKENS = ("_anomaly_",)
-
-
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized = dict(_DEFAULT_CONFIG)
     if config:
@@ -104,12 +93,6 @@ def _resolve_elo_aliases(df: pd.DataFrame) -> pd.DataFrame:
 
 def _is_leakage_column(col: str, target_column: str) -> bool:
     if col == target_column:
-        return False
-    if col in _ANOMALY_SAFE_EXACT:
-        return False
-    if col.startswith(_ANOMALY_SAFE_PREFIXES):
-        return False
-    if any(token in col for token in _ANOMALY_SAFE_TOKENS):
         return False
     return bool(_LEAKAGE_PATTERN.search(col))
 

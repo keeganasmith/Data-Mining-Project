@@ -23,21 +23,9 @@ DEFAULT_EXPERIMENT_CONFIG: dict[str, Any] = {
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "elo_feature_prefixes": ["elo_"],
     "elo_feature_columns": [],
-    "anomaly_feature_prefixes": ["anom_"],
-    "anomaly_feature_tokens": ["_anomaly_"],
-    "anomaly_feature_columns": [
-        "anomaly_score",
-        "robust_z_anomaly_score",
-        "knn_anomaly_score",
-        "iforest_anomaly_score",
-        "anomaly_flag",
-        "surface_anomaly_z",
-    ],
     "feature_sets": [
-        {"name": "structured_only", "include_elo": False, "include_anomaly": False},
-        {"name": "structured_plus_anomaly", "include_elo": False, "include_anomaly": True},
-        {"name": "structured_plus_elo", "include_elo": True, "include_anomaly": False},
-        {"name": "structured_plus_anomaly_plus_elo", "include_elo": True, "include_anomaly": True},
+        {"name": "structured_only", "include_elo": False},
+        {"name": "structured_plus_elo", "include_elo": True},
     ],
 }
 
@@ -57,9 +45,6 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "id_columns",
         "elo_feature_prefixes",
         "elo_feature_columns",
-        "anomaly_feature_prefixes",
-        "anomaly_feature_tokens",
-        "anomaly_feature_columns",
         "feature_sets",
     )
     for key in list_keys:
@@ -76,16 +61,14 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
             raise TypeError("Each experiments config feature set must be a mapping")
         name = entry.get("name")
         include_elo = entry.get("include_elo")
-        include_anomaly = entry.get("include_anomaly")
         if not isinstance(name, str) or not name.strip():
             raise TypeError("Each feature set requires non-empty 'name'")
-        if not isinstance(include_elo, bool) or not isinstance(include_anomaly, bool):
-            raise TypeError("Each feature set requires bool 'include_elo' and 'include_anomaly'")
+        if not isinstance(include_elo, bool):
+            raise TypeError("Each feature set requires bool 'include_elo'")
         validated_sets.append(
             {
                 "name": name.strip(),
                 "include_elo": include_elo,
-                "include_anomaly": include_anomaly,
             }
         )
 
@@ -93,7 +76,7 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
-def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[list[str], list[str], list[str]]:
+def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     target_column = cfg["target_column"]
     id_columns = set(cfg["id_columns"])
 
@@ -101,19 +84,10 @@ def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[
 
     elo_prefixes = tuple(cfg["elo_feature_prefixes"])
     elo_exact = set(cfg["elo_feature_columns"])
-    anomaly_prefixes = tuple(cfg["anomaly_feature_prefixes"])
-    anomaly_tokens = tuple(cfg["anomaly_feature_tokens"])
-    anomaly_exact = set(cfg["anomaly_feature_columns"])
 
     elo_features = [c for c in base_features if c in elo_exact or c.startswith(elo_prefixes)]
-    anomaly_features = [
-        c
-        for c in base_features
-        if c in anomaly_exact or c.startswith(anomaly_prefixes) or any(token in c for token in anomaly_tokens)
-    ]
-
-    structured_features = [c for c in base_features if c not in set(elo_features) and c not in set(anomaly_features)]
-    return structured_features, elo_features, anomaly_features
+    structured_features = [c for c in base_features if c not in set(elo_features)]
+    return structured_features, elo_features
 
 
 def materialize_feature_sets(
@@ -139,7 +113,7 @@ def materialize_feature_sets(
         raise ValueError(f"Target column '{target_column}' is required for feature-set materialization")
 
     id_cols = [c for c in cfg["id_columns"] if c in df.columns]
-    structured, elo, anomaly = _collect_feature_columns(df, cfg)
+    structured, elo = _collect_feature_columns(df, cfg)
 
     experiment_dir = Path(output_dir) / cfg["output_subdir"]
     experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -154,8 +128,6 @@ def materialize_feature_sets(
         selected = list(structured)
         if feature_set["include_elo"]:
             selected.extend(elo)
-        if feature_set["include_anomaly"]:
-            selected.extend(anomaly)
 
         ordered_features = [c for c in df.columns if c in set(selected)]
         out_columns = [*id_cols, *ordered_features, target_column]
@@ -175,7 +147,6 @@ def materialize_feature_sets(
                 "feature_count": int(len(ordered_features)),
                 "feature_columns": ordered_features,
                 "include_elo": feature_set["include_elo"],
-                "include_anomaly": feature_set["include_anomaly"],
             }
         )
 
@@ -185,7 +156,6 @@ def materialize_feature_sets(
         "id_columns": id_cols,
         "structured_feature_columns": structured,
         "elo_feature_columns": elo,
-        "anomaly_feature_columns": anomaly,
         "feature_sets": manifest_sets,
     }
     manifest_path = experiment_dir / cfg["manifest_filename"]
