@@ -1,4 +1,6 @@
 import importlib
+import itertools
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +69,10 @@ class ClusteringFeatureStepTests(unittest.TestCase):
             self.assertIn("cluster_kmeans_id", out.columns)
             self.assertIn("cluster_dbscan_id", out.columns)
             self.assertTrue(artifact_path.exists())
+            artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            self.assertIn("dbscan_staged_results", artifact_payload)
+            self.assertIn("stage1", artifact_payload["dbscan_staged_results"])
+            self.assertIn("stage2", artifact_payload["dbscan_staged_results"])
             self.assertTrue((plot_dir / "clustering_tuning_kmeans.png").exists())
             self.assertTrue((plot_dir / "clustering_tuning_dbscan.png").exists())
 
@@ -89,6 +95,66 @@ class ClusteringFeatureStepTests(unittest.TestCase):
                     out = step.run(df, config=base_config)
             self.assertIn("cluster_kmeans_id", out.columns)
             self.assertIn("cluster_dbscan_id", out.columns)
+
+    def test_tuning_budget_stops_early_and_falls_back_to_defaults(self) -> None:
+        df = self._sample_df()
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "cluster_artifact.json"
+            plot_dir = Path(tmp) / "plots"
+            tick = itertools.count()
+            with mock.patch.object(step.time, "perf_counter", side_effect=lambda: 100.0 + next(tick) * 0.2):
+                out = step.run(
+                    df,
+                    config={
+                        "method": "both",
+                        "fit_scope": "all_data",
+                        "train_fraction": 0.5,
+                        "tuning_artifact_path": str(artifact_path),
+                        "tuning_plot_dir": str(plot_dir),
+                        "kmeans_n_clusters": 3,
+                        "dbscan_eps": 1.1,
+                        "dbscan_min_samples": 2,
+                        "dbscan_tuning_min_samples": [1, 2],
+                        "tuning_time_budget_seconds": 0.05,
+                    },
+                )
+            self.assertIn("cluster_kmeans_id", out.columns)
+            self.assertIn("cluster_dbscan_id", out.columns)
+            artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            self.assertEqual(artifact_payload["kmeans"]["n_clusters"], 3)
+            self.assertEqual(artifact_payload["dbscan"]["eps"], 1.1)
+            self.assertEqual(artifact_payload["dbscan"]["min_samples"], 2)
+            self.assertTrue(artifact_payload["kmeans_tuning_metadata"]["stopped_early"])
+            self.assertTrue(artifact_payload["dbscan_tuning_metadata"]["stopped_early"])
+            self.assertGreater(artifact_payload["kmeans_tuning_metadata"]["elapsed_seconds"], 0.0)
+            self.assertGreater(artifact_payload["dbscan_tuning_metadata"]["elapsed_seconds"], 0.0)
+    def test_large_auto_tune_all_data_requires_override(self) -> None:
+        df = self._sample_df()
+        with self.assertRaisesRegex(ValueError, "requires fit_scope='train_only'"):
+            step.run(
+                df,
+                config={
+                    "method": "kmeans",
+                    "fit_scope": "all_data",
+                    "auto_tune": True,
+                    "auto_tune_train_only_max_rows": 2,
+                    "kmeans_n_clusters": 2,
+                },
+            )
+
+    def test_large_auto_tune_all_data_with_override_runs(self) -> None:
+        df = self._sample_df()
+        out = step.run(
+            df,
+            config={
+                "method": "kmeans",
+                "fit_scope": "all_data",
+                "auto_tune": True,
+                "auto_tune_train_only_max_rows": 2,
+                "allow_auto_tune_all_data_override": True,
+            },
+        )
+        self.assertIn("cluster_kmeans_id", out.columns)
 
 
 if __name__ == "__main__":

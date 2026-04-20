@@ -57,10 +57,25 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "fit_scope": "train_only",
     # Auto-tune clustering hyperparameters to maximize silhouette score.
     "auto_tune": True,
+    # Production safeguard: when auto_tune=True and row count exceeds this value,
+    # enforce fit_scope="train_only" unless allow_auto_tune_all_data_override=True.
+    "auto_tune_train_only_max_rows": 50_000,
+    # Explicit escape hatch for large-table all-data auto-tuning (diagnostics only).
+    "allow_auto_tune_all_data_override": False,
+    # Tuning profile selector: "full" for exhaustive-ish search, "fast" for compact search grids.
+    "tuning_profile": "full",
+    # Auto-switch to "fast" profile when row count is high, unless tuning_profile is explicitly set by caller.
+    "fast_mode_row_threshold": 50_000,
     # Optional artifact path used to cache best hyperparameters and tuning results.
     "tuning_artifact_path": "data/processed/clustering_tuning_artifact.json",
     # Optional output directory for tuning summary plots.
     "tuning_plot_dir": "data/processed",
+    # Maximum number of rows used when scoring clustering candidates during tuning.
+    "tuning_score_sample_size": 10000,
+    # Fixed seed for deterministic tuning-score subsampling.
+    "tuning_score_random_state": 42,
+    # Global wall-clock budget for each clustering tuner (seconds).
+    "tuning_time_budget_seconds": 1800,
     # Parallel worker count used by clustering tuning/search helpers.
     # -1 means use all available cores.
     "parallel_n_jobs": -1,
@@ -74,12 +89,23 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "kmeans_n_init": 10,
     # KMeans tuning search space.
     "kmeans_tuning_n_clusters": [2, 3, 4, 5, 6, 7, 8, 9, 10],
+    # KMeans compact tuning search space for fast profile.
+    "kmeans_tuning_n_clusters_fast": [4, 6, 8, 10],
     # DBSCAN knobs.
     "dbscan_eps": 0.9,
     "dbscan_min_samples": 25,
     # DBSCAN tuning search space.
     "dbscan_tuning_eps": [0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5],
     "dbscan_tuning_min_samples": [5, 10, 15, 20, 25, 30],
+    # DBSCAN compact tuning search space for fast profile (~9 combos total).
+    "dbscan_tuning_eps_fast": [0.6, 0.9, 1.2],
+    "dbscan_tuning_min_samples_fast": [10, 20, 30],
+    # Stage-1 row budget for coarse DBSCAN candidate screening.
+    "dbscan_stage1_sample_size": 5_000,
+    # Stage-2 row budget for refined DBSCAN survivor scoring.
+    "dbscan_stage2_sample_size": 10_000,
+    # Number of stage-1 DBSCAN candidates promoted to stage 2.
+    "dbscan_top_n": 5,
 }
 
 
