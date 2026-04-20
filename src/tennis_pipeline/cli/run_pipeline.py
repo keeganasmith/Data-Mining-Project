@@ -33,9 +33,7 @@ STEP_MODULES: tuple[str, ...] = (
     "03_clean_values",
     "04_split_roles",
     "05_build_features_static",
-    # Keep Elo before anomaly so anomaly scoring can optionally consume Elo-derived columns.
     "06_build_features_temporal_elo",
-    "06b_build_features_anomaly_surface",
     "07_finalize_model_table",
 )
 
@@ -106,7 +104,6 @@ def run_pipeline(
     output_dir: str | Path = "data",
     *,
     use_elo: bool = False,
-    use_anomaly: bool = False,
     run_feature_set_experiment: bool = False,
     config_path: str | Path | None = None,
     training_profile: str | None = None,
@@ -115,7 +112,7 @@ def run_pipeline(
 
     print("[pipeline] starting tennis pipeline run")
     if run_feature_set_experiment:
-        print("[pipeline] --run-feature-set-experiment enabled (implies Elo + anomaly stages)")
+        print("[pipeline] --run-feature-set-experiment enabled (implies Elo stage)")
 
     cfg = _load_config(config_path)
     out_root = Path(output_dir)
@@ -127,7 +124,6 @@ def run_pipeline(
     current: pd.DataFrame | str | Path = Path(input_path)
 
     effective_use_elo = use_elo or run_feature_set_experiment
-    effective_use_anomaly = use_anomaly or run_feature_set_experiment
 
     for step_name in STEP_MODULES:
         print(f"[pipeline] step {step_name}: start")
@@ -139,14 +135,9 @@ def run_pipeline(
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
             print(f"[pipeline] step {step_name}: skipped (Elo disabled); wrote defaults")
             continue
-        if step_name == "06b_build_features_anomaly_surface" and not effective_use_anomaly:
-            print(f"[pipeline] step {step_name}: skipped (anomaly disabled)")
-            continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
         step_config = dict(cfg.get(step_name, {}))
-        if step_name == "06b_build_features_anomaly_surface":
-            step_config.setdefault("artifact_output_dir", str(out_root / "artifacts" / step_name))
         current = module.run(current, config=step_config)
 
         if not isinstance(current, pd.DataFrame):
@@ -248,16 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable temporal Elo feature stage (06_build_features_temporal_elo)",
     )
     parser.add_argument(
-        "--use-anomaly",
-        action="store_true",
-        help="Enable surface-aware anomaly feature stage (06b_build_features_anomaly_surface)",
-    )
-    parser.add_argument(
         "--run-feature-set-experiment",
         action="store_true",
         help=(
-            "Train fixed-hyperparameter models across four feature sets: raw only, raw+elo, "
-            "raw+anomaly, and raw+elo+anomaly. Implies --use-elo and --use-anomaly."
+            "Train fixed-hyperparameter models across feature sets that retain temporal pre-match "
+            "skill signals. Implies --use-elo."
         ),
     )
     parser.add_argument(
@@ -279,7 +265,6 @@ def main() -> None:
         input_path=args.input_path,
         output_dir=args.output_dir,
         use_elo=bool(args.use_elo),
-        use_anomaly=bool(args.use_anomaly),
         run_feature_set_experiment=bool(args.run_feature_set_experiment),
         config_path=args.config_path,
         training_profile=args.training_profile,
