@@ -23,9 +23,23 @@ DEFAULT_EXPERIMENT_CONFIG: dict[str, Any] = {
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "elo_feature_prefixes": ["elo_"],
     "elo_feature_columns": [],
+    "temporal_feature_prefixes": ["temporal_"],
+    "temporal_feature_columns": [],
+    "clustering_feature_prefixes": ["cluster_"],
+    "clustering_feature_columns": [],
     "feature_sets": [
-        {"name": "structured_only", "include_elo": False},
-        {"name": "structured_plus_elo", "include_elo": True},
+        {
+            "name": "data_only",
+            "include_elo": False,
+            "include_temporal": False,
+            "include_clustering": False,
+        },
+        {
+            "name": "data_plus_temporal_elo_clustering",
+            "include_elo": True,
+            "include_temporal": True,
+            "include_clustering": True,
+        },
     ],
 }
 
@@ -45,6 +59,10 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "id_columns",
         "elo_feature_prefixes",
         "elo_feature_columns",
+        "temporal_feature_prefixes",
+        "temporal_feature_columns",
+        "clustering_feature_prefixes",
+        "clustering_feature_columns",
         "feature_sets",
     )
     for key in list_keys:
@@ -61,14 +79,22 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
             raise TypeError("Each experiments config feature set must be a mapping")
         name = entry.get("name")
         include_elo = entry.get("include_elo")
+        include_temporal = entry.get("include_temporal", False)
+        include_clustering = entry.get("include_clustering", False)
         if not isinstance(name, str) or not name.strip():
             raise TypeError("Each feature set requires non-empty 'name'")
         if not isinstance(include_elo, bool):
             raise TypeError("Each feature set requires bool 'include_elo'")
+        if not isinstance(include_temporal, bool):
+            raise TypeError("Each feature set requires bool 'include_temporal'")
+        if not isinstance(include_clustering, bool):
+            raise TypeError("Each feature set requires bool 'include_clustering'")
         validated_sets.append(
             {
                 "name": name.strip(),
                 "include_elo": include_elo,
+                "include_temporal": include_temporal,
+                "include_clustering": include_clustering,
             }
         )
 
@@ -76,7 +102,7 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
-def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[list[str], list[str], list[str], list[str]]:
     target_column = cfg["target_column"]
     id_columns = set(cfg["id_columns"])
 
@@ -84,10 +110,17 @@ def _collect_feature_columns(df: pd.DataFrame, cfg: Mapping[str, Any]) -> tuple[
 
     elo_prefixes = tuple(cfg["elo_feature_prefixes"])
     elo_exact = set(cfg["elo_feature_columns"])
+    temporal_prefixes = tuple(cfg["temporal_feature_prefixes"])
+    temporal_exact = set(cfg["temporal_feature_columns"])
+    clustering_prefixes = tuple(cfg["clustering_feature_prefixes"])
+    clustering_exact = set(cfg["clustering_feature_columns"])
 
     elo_features = [c for c in base_features if c in elo_exact or c.startswith(elo_prefixes)]
-    structured_features = [c for c in base_features if c not in set(elo_features)]
-    return structured_features, elo_features
+    temporal_features = [c for c in base_features if c in temporal_exact or c.startswith(temporal_prefixes)]
+    clustering_features = [c for c in base_features if c in clustering_exact or c.startswith(clustering_prefixes)]
+    engineered = set(elo_features) | set(temporal_features) | set(clustering_features)
+    structured_features = [c for c in base_features if c not in engineered]
+    return structured_features, elo_features, temporal_features, clustering_features
 
 
 def materialize_feature_sets(
@@ -113,7 +146,7 @@ def materialize_feature_sets(
         raise ValueError(f"Target column '{target_column}' is required for feature-set materialization")
 
     id_cols = [c for c in cfg["id_columns"] if c in df.columns]
-    structured, elo = _collect_feature_columns(df, cfg)
+    structured, elo, temporal, clustering = _collect_feature_columns(df, cfg)
 
     experiment_dir = Path(output_dir) / cfg["output_subdir"]
     experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +161,10 @@ def materialize_feature_sets(
         selected = list(structured)
         if feature_set["include_elo"]:
             selected.extend(elo)
+        if feature_set["include_temporal"]:
+            selected.extend(temporal)
+        if feature_set["include_clustering"]:
+            selected.extend(clustering)
 
         ordered_features = [c for c in df.columns if c in set(selected)]
         out_columns = [*id_cols, *ordered_features, target_column]
@@ -147,6 +184,8 @@ def materialize_feature_sets(
                 "feature_count": int(len(ordered_features)),
                 "feature_columns": ordered_features,
                 "include_elo": feature_set["include_elo"],
+                "include_temporal": feature_set["include_temporal"],
+                "include_clustering": feature_set["include_clustering"],
             }
         )
 
@@ -156,6 +195,8 @@ def materialize_feature_sets(
         "id_columns": id_cols,
         "structured_feature_columns": structured,
         "elo_feature_columns": elo,
+        "temporal_feature_columns": temporal,
+        "clustering_feature_columns": clustering,
         "feature_sets": manifest_sets,
     }
     manifest_path = experiment_dir / cfg["manifest_filename"]

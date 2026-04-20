@@ -842,7 +842,7 @@ def run_feature_set_training_experiment(
             by=["model", "feature_set"],
             kind="stable",
         )
-        summary_csv = summary_dir / "feature_set_pricing_metric_comparison.csv"
+        summary_csv = summary_dir / "feature_set_probability_metric_comparison.csv"
         summary_df.to_csv(summary_csv, index=False)
 
         plotted_models = list(summary_df["model"].drop_duplicates())
@@ -850,14 +850,15 @@ def run_feature_set_training_experiment(
         x = np.arange(len(feature_sets))
         bar_width = 0.8 / max(1, len(plotted_models))
 
-        pricing_metrics = [
+        probability_metrics = [
             ("test_log_loss", "Test log loss (lower is better)"),
             ("test_brier_score", "Test Brier score (lower is better)"),
             ("test_ece_10_bins", "Test ECE (10 bins, lower is better)"),
+            ("test_roc_auc", "Test ROC-AUC (higher is better)"),
         ]
 
-        fig, axes = plt.subplots(1, len(pricing_metrics), figsize=(18, 6), sharex=True)
-        for metric_idx, (metric_key, metric_label) in enumerate(pricing_metrics):
+        fig, axes = plt.subplots(1, len(probability_metrics), figsize=(24, 6), sharex=True)
+        for metric_idx, (metric_key, metric_label) in enumerate(probability_metrics):
             ax = axes[metric_idx]
             for model_idx, model_name in enumerate(plotted_models):
                 model_slice = (
@@ -882,12 +883,34 @@ def run_feature_set_training_experiment(
         axes[0].legend(title="model")
         fig.tight_layout()
 
-        comparison_plot = summary_dir / "feature_set_pricing_metric_comparison.png"
+        comparison_plot = summary_dir / "feature_set_probability_metric_comparison.png"
         fig.savefig(comparison_plot, bbox_inches="tight")
         plt.close(fig)
 
+        legacy_summary_csv = summary_dir / "feature_set_pricing_metric_comparison.csv"
+        legacy_comparison_plot = summary_dir / "feature_set_pricing_metric_comparison.png"
+        summary_df.to_csv(legacy_summary_csv, index=False)
+        fig_legacy, ax_legacy = plt.subplots(figsize=(8, 5))
+        for model_name in plotted_models:
+            model_slice = (
+                summary_df[summary_df["model"] == model_name]
+                .set_index("feature_set")
+                .reindex(feature_sets)
+            )
+            ax_legacy.plot(feature_sets, model_slice["test_log_loss"].to_numpy(), marker="o", label=model_name)
+        ax_legacy.set_title("Feature-set comparison (test log loss)")
+        ax_legacy.set_xlabel("feature set")
+        ax_legacy.set_ylabel("test log loss")
+        ax_legacy.grid(alpha=0.3)
+        ax_legacy.legend(title="model")
+        fig_legacy.tight_layout()
+        fig_legacy.savefig(legacy_comparison_plot, bbox_inches="tight")
+        plt.close(fig_legacy)
+
         for feature_set_name, run_manifest in manifests.items():
             artifacts = run_manifest.setdefault("artifacts", {})
-            artifacts["feature_set_pricing_metric_comparison_csv"] = str(summary_csv)
-            artifacts["feature_set_pricing_metric_comparison_plot"] = str(comparison_plot)
+            artifacts["feature_set_probability_metric_comparison_csv"] = str(summary_csv)
+            artifacts["feature_set_probability_metric_comparison_plot"] = str(comparison_plot)
+            artifacts["feature_set_pricing_metric_comparison_csv"] = str(legacy_summary_csv)
+            artifacts["feature_set_pricing_metric_comparison_plot"] = str(legacy_comparison_plot)
     return manifests
