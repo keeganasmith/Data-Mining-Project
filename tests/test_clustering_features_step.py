@@ -1,4 +1,5 @@
 import importlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +68,10 @@ class ClusteringFeatureStepTests(unittest.TestCase):
             self.assertIn("cluster_kmeans_id", out.columns)
             self.assertIn("cluster_dbscan_id", out.columns)
             self.assertTrue(artifact_path.exists())
+            artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            self.assertIn("dbscan_staged_results", artifact_payload)
+            self.assertIn("stage1", artifact_payload["dbscan_staged_results"])
+            self.assertIn("stage2", artifact_payload["dbscan_staged_results"])
             self.assertTrue((plot_dir / "clustering_tuning_kmeans.png").exists())
             self.assertTrue((plot_dir / "clustering_tuning_dbscan.png").exists())
 

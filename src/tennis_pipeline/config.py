@@ -93,6 +93,12 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     # DBSCAN compact tuning search space for fast profile (~9 combos total).
     "dbscan_tuning_eps_fast": [0.6, 0.9, 1.2],
     "dbscan_tuning_min_samples_fast": [10, 20, 30],
+    # Stage-1 row budget for coarse DBSCAN candidate screening.
+    "dbscan_stage1_sample_size": 5_000,
+    # Stage-2 row budget for refined DBSCAN survivor scoring.
+    "dbscan_stage2_sample_size": 10_000,
+    # Number of stage-1 DBSCAN candidates promoted to stage 2.
+    "dbscan_top_n": 5,
 }
 
 
