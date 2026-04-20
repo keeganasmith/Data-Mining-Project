@@ -277,11 +277,18 @@ For each model, it trains with fixed defaults (no depth/hyperparameter sweep) an
 
 - `depth_accuracy_curves.csv` (training and validation accuracy by depth)
 - `depth_accuracy_curves.png` (training vs validation accuracy curves)
-- `model_summary_metrics.csv` (test accuracy, test ROC-AUC, and fixed-depth metadata)
+- `model_summary_metrics.csv` (probability-quality metrics—test log loss, test Brier score, test ECE—plus ROC-AUC and accuracy diagnostics)
 - `roc_curve__decision_tree.png`
 - `roc_curve__random_forest.png`
 - `roc_curve__gbdt.png`
 - `model_training_manifest.json`
+
+When running feature-set experiments (`--run-feature-set-experiment`), the cross-run summary now defaults to **pricing-oriented probabilistic metrics**:
+
+- `feature_set_pricing_metric_comparison.csv`
+- `feature_set_pricing_metric_comparison.png`
+
+This default is intentional for market pricing workflows. Book/price construction depends on reliable class probabilities (well-calibrated confidence), not just hard win/loss labels. A model can post similar or even better test accuracy while still producing worse implied probabilities; log loss, Brier score, and ECE directly measure this risk.
 
 All artifacts are written under:
 

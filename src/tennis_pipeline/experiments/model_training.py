@@ -544,17 +544,17 @@ def run_feature_set_training_experiment(
         manifests[feature_set_name] = run_manifest
         for model_metrics in run_manifest.get("models", []):
             model_name = model_metrics.get("model")
-            test_accuracy = model_metrics.get("test_accuracy")
-            if isinstance(model_name, str) and isinstance(test_accuracy, (int, float)):
+            if isinstance(model_name, str):
                 run_summary_rows.append(
                     {
                         "feature_set": feature_set_name,
                         "model": model_name,
-                        "test_accuracy": float(test_accuracy),
-                        "test_roc_auc": float(model_metrics.get("test_roc_auc", np.nan)),
                         "test_log_loss": float(model_metrics.get("test_log_loss", np.nan)),
                         "test_brier_score": float(model_metrics.get("test_brier_score", np.nan)),
                         "test_ece_10_bins": float(model_metrics.get("test_ece_10_bins", np.nan)),
+                        "test_roc_auc": float(model_metrics.get("test_roc_auc", np.nan)),
+                        # Accuracy is retained as a secondary diagnostic metric.
+                        "test_accuracy": float(model_metrics.get("test_accuracy", np.nan)),
                     }
                 )
         ended_at = datetime.now(timezone.utc)
@@ -572,7 +572,7 @@ def run_feature_set_training_experiment(
             by=["model", "feature_set"],
             kind="stable",
         )
-        summary_csv = summary_dir / "feature_set_accuracy_comparison.csv"
+        summary_csv = summary_dir / "feature_set_pricing_metric_comparison.csv"
         summary_df.to_csv(summary_csv, index=False)
 
         plotted_models = list(summary_df["model"].drop_duplicates())
@@ -580,37 +580,44 @@ def run_feature_set_training_experiment(
         x = np.arange(len(feature_sets))
         bar_width = 0.8 / max(1, len(plotted_models))
 
-        fig, ax = plt.subplots(figsize=(12, 6))
-        for idx, model_name in enumerate(plotted_models):
-            model_slice = (
-                summary_df[summary_df["model"] == model_name]
-                .set_index("feature_set")
-                .reindex(feature_sets)
-            )
-            y_vals = model_slice["test_accuracy"].fillna(0.0).to_numpy()
-            ax.bar(
-                x + (idx - (len(plotted_models) - 1) / 2.0) * bar_width,
-                y_vals,
-                width=bar_width,
-                label=model_name,
-            )
+        pricing_metrics = [
+            ("test_log_loss", "Test log loss (lower is better)"),
+            ("test_brier_score", "Test Brier score (lower is better)"),
+            ("test_ece_10_bins", "Test ECE (10 bins, lower is better)"),
+        ]
 
-        ax.set_title("Feature-set experiment: test accuracy comparison")
-        ax.set_xlabel("feature set")
-        ax.set_ylabel("test accuracy")
-        ax.set_ylim(0.0, 1.0)
-        ax.set_xticks(x)
-        ax.set_xticklabels(feature_sets, rotation=20, ha="right")
-        ax.grid(axis="y", alpha=0.3)
-        ax.legend(title="model")
+        fig, axes = plt.subplots(1, len(pricing_metrics), figsize=(18, 6), sharex=True)
+        for metric_idx, (metric_key, metric_label) in enumerate(pricing_metrics):
+            ax = axes[metric_idx]
+            for model_idx, model_name in enumerate(plotted_models):
+                model_slice = (
+                    summary_df[summary_df["model"] == model_name]
+                    .set_index("feature_set")
+                    .reindex(feature_sets)
+                )
+                y_vals = model_slice[metric_key].to_numpy()
+                ax.bar(
+                    x + (model_idx - (len(plotted_models) - 1) / 2.0) * bar_width,
+                    y_vals,
+                    width=bar_width,
+                    label=model_name if metric_idx == 0 else None,
+                )
+
+            ax.set_title(metric_label)
+            ax.set_xlabel("feature set")
+            ax.set_xticks(x)
+            ax.set_xticklabels(feature_sets, rotation=20, ha="right")
+            ax.grid(axis="y", alpha=0.3)
+        axes[0].set_ylabel("metric value")
+        axes[0].legend(title="model")
         fig.tight_layout()
 
-        comparison_plot = summary_dir / "feature_set_accuracy_comparison.png"
+        comparison_plot = summary_dir / "feature_set_pricing_metric_comparison.png"
         fig.savefig(comparison_plot, bbox_inches="tight")
         plt.close(fig)
 
         for feature_set_name, run_manifest in manifests.items():
             artifacts = run_manifest.setdefault("artifacts", {})
-            artifacts["feature_set_accuracy_comparison_csv"] = str(summary_csv)
-            artifacts["feature_set_accuracy_comparison_plot"] = str(comparison_plot)
+            artifacts["feature_set_pricing_metric_comparison_csv"] = str(summary_csv)
+            artifacts["feature_set_pricing_metric_comparison_plot"] = str(comparison_plot)
     return manifests
