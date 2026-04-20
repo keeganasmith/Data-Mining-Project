@@ -57,6 +57,10 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "fit_scope": "train_only",
     # Auto-tune clustering hyperparameters to maximize silhouette score.
     "auto_tune": True,
+    # Tuning profile selector: "full" for exhaustive-ish search, "fast" for compact search grids.
+    "tuning_profile": "full",
+    # Auto-switch to "fast" profile when row count is high, unless tuning_profile is explicitly set by caller.
+    "fast_mode_row_threshold": 50_000,
     # Optional artifact path used to cache best hyperparameters and tuning results.
     "tuning_artifact_path": "data/processed/clustering_tuning_artifact.json",
     # Optional output directory for tuning summary plots.
@@ -78,12 +82,17 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "kmeans_n_init": 10,
     # KMeans tuning search space.
     "kmeans_tuning_n_clusters": [2, 3, 4, 5, 6, 7, 8, 9, 10],
+    # KMeans compact tuning search space for fast profile.
+    "kmeans_tuning_n_clusters_fast": [4, 6, 8, 10],
     # DBSCAN knobs.
     "dbscan_eps": 0.9,
     "dbscan_min_samples": 25,
     # DBSCAN tuning search space.
     "dbscan_tuning_eps": [0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5],
     "dbscan_tuning_min_samples": [5, 10, 15, 20, 25, 30],
+    # DBSCAN compact tuning search space for fast profile (~9 combos total).
+    "dbscan_tuning_eps_fast": [0.6, 0.9, 1.2],
+    "dbscan_tuning_min_samples_fast": [10, 20, 30],
 }
 
 
