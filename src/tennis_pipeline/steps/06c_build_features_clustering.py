@@ -16,6 +16,7 @@ Notes on leakage:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,13 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         raise TypeError("config['dbscan_top_n'] must be an int")
     if dbscan_top_n < 1:
         raise ValueError("config['dbscan_top_n'] must be >= 1")
+
+    tuning_time_budget_seconds = normalized.get("tuning_time_budget_seconds")
+    if not isinstance(tuning_time_budget_seconds, (int, float)):
+        raise TypeError("config['tuning_time_budget_seconds'] must be numeric")
+    if float(tuning_time_budget_seconds) <= 0:
+        raise ValueError("config['tuning_time_budget_seconds'] must be > 0")
+    normalized["tuning_time_budget_seconds"] = float(tuning_time_budget_seconds)
 
     parallel_n_jobs = normalized.get("parallel_n_jobs")
     if not isinstance(parallel_n_jobs, int):
@@ -405,6 +413,9 @@ def _tune_kmeans(
     x_train: np.ndarray,
     cfg: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    start_time = time.perf_counter()
+    budget_seconds = float(cfg["tuning_time_budget_seconds"])
+    stopped_early = False
     candidates = [n_clusters for n_clusters in sorted({int(v) for v in cfg["kmeans_tuning_n_clusters"]}) if n_clusters < x_train.shape[0]]
 
     def _evaluate(n_clusters: int, stage: str) -> dict[str, Any]:
@@ -429,9 +440,15 @@ def _tune_kmeans(
         coarse_idx = sorted({0, len(candidates) // 2, len(candidates) - 1})
         coarse_candidates = [candidates[idx] for idx in coarse_idx]
 
-    coarse_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(n_clusters, "coarse") for n_clusters in coarse_candidates
-    )
+    coarse_results: list[dict[str, Any]] = []
+    if coarse_candidates:
+        elapsed_before_coarse = time.perf_counter() - start_time
+        if elapsed_before_coarse >= budget_seconds:
+            stopped_early = True
+        else:
+            coarse_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+                delayed(_evaluate)(n_clusters, "coarse") for n_clusters in coarse_candidates
+            )
 
     best_coarse: dict[str, Any] | None = None
     for row in coarse_results:
@@ -446,9 +463,15 @@ def _tune_kmeans(
         for n_clusters in candidates
         if abs(n_clusters - best_coarse_n_clusters) <= neighborhood_radius and n_clusters not in set(coarse_candidates)
     ]
-    local_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(n_clusters, "local_refine") for n_clusters in local_candidates
-    )
+    local_results: list[dict[str, Any]] = []
+    if local_candidates:
+        elapsed_before_local = time.perf_counter() - start_time
+        if elapsed_before_local >= budget_seconds:
+            stopped_early = True
+        else:
+            local_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+                delayed(_evaluate)(n_clusters, "local_refine") for n_clusters in local_candidates
+            )
 
     result_rows_by_cluster: dict[int, dict[str, Any]] = {}
     for row in [*coarse_results, *local_results]:
@@ -470,6 +493,9 @@ def _tune_kmeans(
         "best_coarse_n_clusters": int(best_coarse_n_clusters),
         "local_neighborhood_radius": int(neighborhood_radius),
         "local_candidates": local_candidates,
+        "stopped_early": bool(stopped_early),
+        "elapsed_seconds": float(time.perf_counter() - start_time),
+        "time_budget_seconds": float(budget_seconds),
     }
     return best, results, stage_details
 
@@ -480,6 +506,9 @@ def _tune_dbscan(
     ordered_train_mask: np.ndarray,
     cfg: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, float]], dict[str, Any]]:
+    start_time = time.perf_counter()
+    budget_seconds = float(cfg["tuning_time_budget_seconds"])
+    stopped_early = False
     best: dict[str, Any] | None = None
     eps_grid = sorted({float(v) for v in cfg["dbscan_tuning_eps"]})
     min_samples_grid = sorted({int(v) for v in cfg["dbscan_tuning_min_samples"]})
@@ -524,26 +553,44 @@ def _tune_dbscan(
         )
         return {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
 
-    stage1_x_all, stage1_x_train, stage1_train_mask = _subsample(int(cfg["dbscan_stage1_sample_size"]), 101)
-    stage1_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(stage1_x_all, stage1_x_train, stage1_train_mask, eps, min_samples) for eps, min_samples in candidates
-    )
+    stage1_results: list[dict[str, float]] = []
+    survivors: list[tuple[float, int]] = []
+    if candidates:
+        elapsed_before_stage1 = time.perf_counter() - start_time
+        if elapsed_before_stage1 >= budget_seconds:
+            stopped_early = True
+        else:
+            stage1_x_all, stage1_x_train, stage1_train_mask = _subsample(int(cfg["dbscan_stage1_sample_size"]), 101)
+            stage1_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+                delayed(_evaluate)(stage1_x_all, stage1_x_train, stage1_train_mask, eps, min_samples) for eps, min_samples in candidates
+            )
 
-    stage1_sorted = sorted(stage1_results, key=lambda row: float(row["silhouette_score"]), reverse=True)
-    top_n = min(int(cfg["dbscan_top_n"]), len(stage1_sorted))
-    survivors = [(float(row["eps"]), int(row["min_samples"])) for row in stage1_sorted[:top_n]]
+    if stage1_results:
+        stage1_sorted = sorted(stage1_results, key=lambda row: float(row["silhouette_score"]), reverse=True)
+        top_n = min(int(cfg["dbscan_top_n"]), len(stage1_sorted))
+        survivors = [(float(row["eps"]), int(row["min_samples"])) for row in stage1_sorted[:top_n]]
 
-    stage2_x_all, stage2_x_train, stage2_train_mask = _subsample(int(cfg["dbscan_stage2_sample_size"]), 202)
-    stage2_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(stage2_x_all, stage2_x_train, stage2_train_mask, eps, min_samples) for eps, min_samples in survivors
-    )
+    stage2_results: list[dict[str, float]] = []
+    if survivors:
+        elapsed_before_stage2 = time.perf_counter() - start_time
+        if elapsed_before_stage2 >= budget_seconds:
+            stopped_early = True
+        else:
+            stage2_x_all, stage2_x_train, stage2_train_mask = _subsample(int(cfg["dbscan_stage2_sample_size"]), 202)
+            stage2_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+                delayed(_evaluate)(stage2_x_all, stage2_x_train, stage2_train_mask, eps, min_samples) for eps, min_samples in survivors
+            )
 
     final_results: list[dict[str, float]] = []
     run_final_pass = int(cfg["dbscan_stage2_sample_size"]) < int(x_all.shape[0])
     if run_final_pass and survivors:
-        final_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-            delayed(_evaluate)(x_all, x_train, ordered_train_mask, eps, min_samples) for eps, min_samples in survivors
-        )
+        elapsed_before_final = time.perf_counter() - start_time
+        if elapsed_before_final >= budget_seconds:
+            stopped_early = True
+        else:
+            final_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+                delayed(_evaluate)(x_all, x_train, ordered_train_mask, eps, min_samples) for eps, min_samples in survivors
+            )
 
     best_rows = final_results if final_results else stage2_results
     for row in best_rows:
@@ -565,6 +612,9 @@ def _tune_dbscan(
         "stage2": stage2_results,
         "final": final_results,
         "survivors": [{"eps": eps, "min_samples": min_samples} for eps, min_samples in survivors],
+        "stopped_early": bool(stopped_early),
+        "elapsed_seconds": float(time.perf_counter() - start_time),
+        "time_budget_seconds": float(budget_seconds),
     }
     return best, merged_results, staged_results
 
@@ -615,6 +665,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     kmeans_stage_details: dict[str, Any] | None = None
     dbscan_results: list[dict[str, float]] = []
     dbscan_staged_results: dict[str, Any] = {}
+    kmeans_tuning_metadata: dict[str, Any] | None = None
+    dbscan_tuning_metadata: dict[str, Any] | None = None
 
     if run_kmeans:
         if isinstance(artifact_kmeans, dict) and "n_clusters" in artifact_kmeans:
@@ -622,8 +674,16 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             kmeans_results = [dict(v) for v in artifact.get("kmeans_results", [])] if isinstance(artifact, dict) else []
             if isinstance(artifact, dict) and isinstance(artifact.get("kmeans_tuning_stages"), dict):
                 kmeans_stage_details = dict(artifact["kmeans_tuning_stages"])
+            if isinstance(artifact, dict) and isinstance(artifact.get("kmeans_tuning_metadata"), dict):
+                kmeans_tuning_metadata = dict(artifact["kmeans_tuning_metadata"])
         elif bool(tuned_cfg["auto_tune"]):
             kmeans_choice, kmeans_results, kmeans_stage_details = _tune_kmeans(x_train, tuned_cfg)
+            if isinstance(kmeans_stage_details, dict):
+                kmeans_tuning_metadata = {
+                    "stopped_early": bool(kmeans_stage_details.get("stopped_early", False)),
+                    "elapsed_seconds": float(kmeans_stage_details.get("elapsed_seconds", 0.0)),
+                    "time_budget_seconds": float(kmeans_stage_details.get("time_budget_seconds", tuned_cfg["tuning_time_budget_seconds"])),
+                }
         else:
             kmeans_choice = {"n_clusters": int(tuned_cfg["kmeans_n_clusters"])}
 
@@ -634,8 +694,16 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             dbscan_staged_results = (
                 dict(artifact.get("dbscan_staged_results", {})) if isinstance(artifact, dict) else {}
             )
+            if isinstance(artifact, dict) and isinstance(artifact.get("dbscan_tuning_metadata"), dict):
+                dbscan_tuning_metadata = dict(artifact["dbscan_tuning_metadata"])
         elif bool(tuned_cfg["auto_tune"]):
             dbscan_choice, dbscan_results, dbscan_staged_results = _tune_dbscan(x_all, x_train, ordered_train_mask, tuned_cfg)
+            if isinstance(dbscan_staged_results, dict):
+                dbscan_tuning_metadata = {
+                    "stopped_early": bool(dbscan_staged_results.get("stopped_early", False)),
+                    "elapsed_seconds": float(dbscan_staged_results.get("elapsed_seconds", 0.0)),
+                    "time_budget_seconds": float(dbscan_staged_results.get("time_budget_seconds", tuned_cfg["tuning_time_budget_seconds"])),
+                }
         else:
             dbscan_choice = {"eps": float(tuned_cfg["dbscan_eps"]), "min_samples": int(tuned_cfg["dbscan_min_samples"])}
 
@@ -651,6 +719,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             artifact_payload["kmeans_results"] = kmeans_results
             if kmeans_stage_details is not None:
                 artifact_payload["kmeans_tuning_stages"] = kmeans_stage_details
+            if kmeans_tuning_metadata is not None:
+                artifact_payload["kmeans_tuning_metadata"] = kmeans_tuning_metadata
         if dbscan_choice is not None:
             artifact_payload["dbscan"] = {
                 "eps": float(dbscan_choice["eps"]),
@@ -658,6 +728,8 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             }
             artifact_payload["dbscan_results"] = dbscan_results
             artifact_payload["dbscan_staged_results"] = dbscan_staged_results
+            if dbscan_tuning_metadata is not None:
+                artifact_payload["dbscan_tuning_metadata"] = dbscan_tuning_metadata
         _write_tuning_artifact(artifact_path, artifact_payload)
 
     if run_kmeans and kmeans_results:
