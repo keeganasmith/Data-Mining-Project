@@ -22,16 +22,19 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
+from threadpoolctl import threadpool_limits
 
 from tennis_pipeline.config import CLUSTERING_DEFAULTS
 from tennis_pipeline.temporal_ordering import prepare_temporal_ordering
 
 _METHODS = {"kmeans", "dbscan", "both"}
 _FIT_SCOPES = {"train_only", "all_data"}
+_PARALLEL_BACKENDS = {"loky", "threading"}
 
 
 def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -89,6 +92,22 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid):
         raise ValueError("config['dbscan_tuning_min_samples'] values must be int >= 1")
 
+    parallel_n_jobs = normalized.get("parallel_n_jobs")
+    if not isinstance(parallel_n_jobs, int):
+        raise TypeError("config['parallel_n_jobs'] must be an int")
+    if parallel_n_jobs == 0 or parallel_n_jobs < -1:
+        raise ValueError("config['parallel_n_jobs'] must be -1 or >= 1")
+
+    parallel_backend = normalized.get("parallel_backend")
+    if parallel_backend not in _PARALLEL_BACKENDS:
+        raise ValueError(f"config['parallel_backend'] must be one of {_PARALLEL_BACKENDS}; got {parallel_backend!r}")
+
+    parallel_inner_threads = normalized.get("parallel_inner_threads")
+    if not isinstance(parallel_inner_threads, int):
+        raise TypeError("config['parallel_inner_threads'] must be an int")
+    if parallel_inner_threads < 1:
+        raise ValueError("config['parallel_inner_threads'] must be >= 1")
+
     return normalized
 
 
@@ -131,8 +150,9 @@ def _assign_dbscan_labels(
     *,
     eps: float,
     min_samples: int,
+    n_jobs: int,
 ) -> np.ndarray:
-    model = DBSCAN(eps=eps, min_samples=min_samples)
+    model = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=n_jobs)
     train_labels = model.fit_predict(x_train)
 
     labels = np.full(shape=(x_all.shape[0],), fill_value=-1, dtype=int)
@@ -144,14 +164,11 @@ def _assign_dbscan_labels(
 
     core_points = x_train[core_idx]
     core_labels = train_labels[core_idx]
-    nn = NearestNeighbors(n_neighbors=1).fit(core_points)
+    nn = NearestNeighbors(n_neighbors=1, n_jobs=n_jobs).fit(core_points)
     distances, neighbors = nn.kneighbors(x_all)
-
-    for i in range(x_all.shape[0]):
-        if train_mask[i]:
-            continue
-        if distances[i, 0] <= eps:
-            labels[i] = int(core_labels[neighbors[i, 0]])
+    non_train_close = (~train_mask) & (distances[:, 0] <= eps)
+    if np.any(non_train_close):
+        labels[non_train_close] = core_labels[neighbors[non_train_close, 0]].astype(int)
     return labels
 
 
@@ -232,18 +249,27 @@ def _load_tuning_artifact(path: Path) -> dict[str, Any] | None:
 
 
 def _tune_kmeans(x_train: np.ndarray, cfg: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, float]]]:
-    results: list[dict[str, float]] = []
-    best: dict[str, Any] | None = None
-    for n_clusters in sorted({int(v) for v in cfg["kmeans_tuning_n_clusters"]}):
-        if n_clusters >= x_train.shape[0]:
-            continue
-        model = KMeans(n_clusters=n_clusters, random_state=int(cfg["kmeans_random_state"]), n_init=int(cfg["kmeans_n_init"]))
-        labels = model.fit_predict(x_train)
+    candidates = [n_clusters for n_clusters in sorted({int(v) for v in cfg["kmeans_tuning_n_clusters"]}) if n_clusters < x_train.shape[0]]
+
+    def _evaluate(n_clusters: int) -> dict[str, float]:
+        with threadpool_limits(limits=int(cfg["parallel_inner_threads"])):
+            model = KMeans(
+                n_clusters=n_clusters,
+                random_state=int(cfg["kmeans_random_state"]),
+                n_init=int(cfg["kmeans_n_init"]),
+            )
+            labels = model.fit_predict(x_train)
         score = _safe_silhouette_score(x_train, labels)
-        row = {"n_clusters": float(n_clusters), "silhouette_score": float(score)}
-        results.append(row)
+        return {"n_clusters": float(n_clusters), "silhouette_score": float(score)}
+
+    results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(n_clusters) for n_clusters in candidates
+    )
+    best: dict[str, Any] | None = None
+    for row in results:
+        score = float(row["silhouette_score"])
         if best is None or score > float(best["silhouette_score"]):
-            best = {"n_clusters": n_clusters, "silhouette_score": score}
+            best = {"n_clusters": int(row["n_clusters"]), "silhouette_score": score}
     if best is None:
         best = {"n_clusters": int(cfg["kmeans_n_clusters"]), "silhouette_score": -1.0}
     return best, results
@@ -255,18 +281,31 @@ def _tune_dbscan(
     ordered_train_mask: np.ndarray,
     cfg: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, float]]]:
-    results: list[dict[str, float]] = []
     best: dict[str, Any] | None = None
     eps_grid = sorted({float(v) for v in cfg["dbscan_tuning_eps"]})
     min_samples_grid = sorted({int(v) for v in cfg["dbscan_tuning_min_samples"]})
-    for eps in eps_grid:
-        for min_samples in min_samples_grid:
-            labels = _assign_dbscan_labels(x_all, x_train, ordered_train_mask, eps=eps, min_samples=min_samples)
-            score = _safe_silhouette_score(x_all, labels)
-            row = {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
-            results.append(row)
-            if best is None or score > float(best["silhouette_score"]):
-                best = {"eps": eps, "min_samples": min_samples, "silhouette_score": score}
+    candidates = [(eps, min_samples) for eps in eps_grid for min_samples in min_samples_grid]
+
+    def _evaluate(eps: float, min_samples: int) -> dict[str, float]:
+        with threadpool_limits(limits=int(cfg["parallel_inner_threads"])):
+            labels = _assign_dbscan_labels(
+                x_all,
+                x_train,
+                ordered_train_mask,
+                eps=eps,
+                min_samples=min_samples,
+                n_jobs=1,
+            )
+        score = _safe_silhouette_score(x_all, labels)
+        return {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
+
+    results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(eps, min_samples) for eps, min_samples in candidates
+    )
+    for row in results:
+        score = float(row["silhouette_score"])
+        if best is None or score > float(best["silhouette_score"]):
+            best = {"eps": float(row["eps"]), "min_samples": int(row["min_samples"]), "silhouette_score": score}
     if best is None:
         best = {"eps": float(cfg["dbscan_eps"]), "min_samples": int(cfg["dbscan_min_samples"]), "silhouette_score": -1.0}
     return best, results
@@ -369,6 +408,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
             ordered_train_mask,
             eps=float((dbscan_choice or {}).get("eps", cfg["dbscan_eps"])),
             min_samples=int((dbscan_choice or {}).get("min_samples", cfg["dbscan_min_samples"])),
+            n_jobs=int(cfg["parallel_n_jobs"]),
         )
 
     result = ordered.sort_values("__row_id", kind="mergesort").drop(columns=["__row_id"], errors="ignore")

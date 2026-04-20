@@ -61,6 +61,13 @@ CLUSTERING_DEFAULTS: dict[str, Any] = {
     "tuning_artifact_path": "data/processed/clustering_tuning_artifact.json",
     # Optional output directory for tuning summary plots.
     "tuning_plot_dir": "data/processed",
+    # Parallel worker count used by clustering tuning/search helpers.
+    # -1 means use all available cores.
+    "parallel_n_jobs": -1,
+    # joblib backend for tuning parallelism ("loky" = processes, "threading" = threads).
+    "parallel_backend": "loky",
+    # Limit native BLAS/OpenMP threads inside each parallel worker to avoid oversubscription.
+    "parallel_inner_threads": 1,
     # KMeans knobs.
     "kmeans_n_clusters": 8,
     "kmeans_random_state": 42,
