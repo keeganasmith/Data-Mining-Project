@@ -297,6 +297,11 @@ def run_stage_checks(df: pd.DataFrame, step_name: str) -> None:
             duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
             check_temporal_monotonicity=True,
         ),
+        "06b_build_features_temporal_rolling": StageValidationSpec(
+            contract=CLEANED_INTERIM_CONTRACT,
+            duplicate_key_sets=(("event_id", "match_id", "team1_player_id", "team2_player_id"),),
+            check_temporal_monotonicity=True,
+        ),
         "07_finalize_model_table": StageValidationSpec(
             contract=FINAL_MODEL_CONTRACT,
             null_rate_columns=(

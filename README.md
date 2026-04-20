@@ -2,7 +2,7 @@
 
 This repository includes a modular, step-based data pipeline for creating a leakage-safe tennis modeling table and experiment artifacts.
 
-The pipeline entrypoint is `src/tennis_pipeline/cli/run_pipeline.py`, which executes steps `01` through `07` in order and writes intermediate and final artifacts to disk.
+The pipeline entrypoint is `src/tennis_pipeline/cli/run_pipeline.py`, which executes steps `01` through `07` in order (including optional temporal feature stages) and writes intermediate and final artifacts to disk.
 
 ## 1) How the pipeline works
 
@@ -14,7 +14,8 @@ The runner executes the following steps in a fixed order:
 4. `04_split_roles`
 5. `05_build_features_static`
 6. `06_build_features_temporal_elo` (optional via `--use-elo`)
-7. `07_finalize_model_table`
+7. `06b_build_features_temporal_rolling` (optional via `--use-temporal-features`)
+8. `07_finalize_model_table`
 
 For each executed step, the pipeline:
 
@@ -42,6 +43,7 @@ python -m tennis_pipeline.cli.run_pipeline \
   --output-dir <output-root> \
   [--config-path <json-or-yaml-config>] \
   [--use-elo] \
+  [--use-temporal-features] \
   [--run-feature-set-experiment]
 ```
 
@@ -71,6 +73,10 @@ python -m tennis_pipeline.cli.run_pipeline \
     - `elo_team2_pre = 1500.0`
     - `elo_prob_team1_pre = 0.5`
 
+
+- `--use-temporal-features` (flag)
+  - Enables step `06b_build_features_temporal_rolling`.
+  - Adds leakage-safe pre-match rolling player-form features (win pct, avg Elo, paired-stat rolling means).
 
 - `--run-feature-set-experiment` (flag)
   - Runs fixed-hyperparameter training across two feature-set variants:
@@ -186,6 +192,22 @@ Primary config keys:
 - `rating_scale` (default 400.0)
 - `feature_prefix` (default `elo`)
 - `strict_validation` (default `True`)
+
+
+## Step 06b — `06b_build_features_temporal_rolling` (optional)
+
+Purpose:
+
+- Adds leakage-safe pre-match rolling player-form features in a separate stage.
+- Includes rolling win percentage, rolling average Elo, and rolling means for paired numeric `team1_*`/`team2_*` stats.
+- Uses the same temporal ordering + pre-capture/post-update pattern to avoid leakage.
+
+Config keys:
+
+- `feature_prefix` (default `temporal`)
+- `rolling_window_matches` (default `None`, i.e., all prior matches)
+- `paired_stats_min_numeric_coverage` (default `0.8`)
+- `include_elo_average`, `elo_team1_pre_column`, `elo_team2_pre_column`, `default_elo`
 
 ## Step 07 — `07_finalize_model_table`
 

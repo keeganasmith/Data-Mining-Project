@@ -34,6 +34,7 @@ STEP_MODULES: tuple[str, ...] = (
     "04_split_roles",
     "05_build_features_static",
     "06_build_features_temporal_elo",
+    "06b_build_features_temporal_rolling",
     "07_finalize_model_table",
 )
 
@@ -104,6 +105,7 @@ def run_pipeline(
     output_dir: str | Path = "data",
     *,
     use_elo: bool = False,
+    use_temporal_features: bool = False,
     run_feature_set_experiment: bool = False,
     config_path: str | Path | None = None,
     training_profile: str | None = None,
@@ -124,6 +126,7 @@ def run_pipeline(
     current: pd.DataFrame | str | Path = Path(input_path)
 
     effective_use_elo = use_elo or run_feature_set_experiment
+    effective_use_temporal_features = use_temporal_features
 
     for step_name in STEP_MODULES:
         print(f"[pipeline] step {step_name}: start")
@@ -134,6 +137,14 @@ def run_pipeline(
             run_stage_checks(current, step_name)
             current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
             print(f"[pipeline] step {step_name}: skipped (Elo disabled); wrote defaults")
+            continue
+
+        if step_name == "06b_build_features_temporal_rolling" and not effective_use_temporal_features:
+            if not isinstance(current, pd.DataFrame):
+                raise TypeError("Pipeline state must be DataFrame before temporal rolling toggle branch")
+            run_stage_checks(current, step_name)
+            current.to_parquet(interim_dir / f"{step_name}.parquet", index=False)
+            print(f"[pipeline] step {step_name}: skipped (temporal rolling disabled)")
             continue
 
         module = importlib.import_module(f"tennis_pipeline.steps.{step_name}")
@@ -239,6 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable temporal Elo feature stage (06_build_features_temporal_elo)",
     )
     parser.add_argument(
+        "--use-temporal-features",
+        action="store_true",
+        help="Enable temporal rolling feature stage (06b_build_features_temporal_rolling)",
+    )
+    parser.add_argument(
         "--run-feature-set-experiment",
         action="store_true",
         help=(
@@ -265,6 +281,7 @@ def main() -> None:
         input_path=args.input_path,
         output_dir=args.output_dir,
         use_elo=bool(args.use_elo),
+        use_temporal_features=bool(args.use_temporal_features),
         run_feature_set_experiment=bool(args.run_feature_set_experiment),
         config_path=args.config_path,
         training_profile=args.training_profile,
