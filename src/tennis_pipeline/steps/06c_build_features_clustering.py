@@ -121,6 +121,24 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     if not all(isinstance(v, int) and v >= 1 for v in dbscan_min_samples_grid_fast):
         raise ValueError("config['dbscan_tuning_min_samples_fast'] values must be int >= 1")
 
+    dbscan_stage1_sample_size = normalized.get("dbscan_stage1_sample_size")
+    if not isinstance(dbscan_stage1_sample_size, int):
+        raise TypeError("config['dbscan_stage1_sample_size'] must be an int")
+    if dbscan_stage1_sample_size < 1:
+        raise ValueError("config['dbscan_stage1_sample_size'] must be >= 1")
+
+    dbscan_stage2_sample_size = normalized.get("dbscan_stage2_sample_size")
+    if not isinstance(dbscan_stage2_sample_size, int):
+        raise TypeError("config['dbscan_stage2_sample_size'] must be an int")
+    if dbscan_stage2_sample_size < 1:
+        raise ValueError("config['dbscan_stage2_sample_size'] must be >= 1")
+
+    dbscan_top_n = normalized.get("dbscan_top_n")
+    if not isinstance(dbscan_top_n, int):
+        raise TypeError("config['dbscan_top_n'] must be an int")
+    if dbscan_top_n < 1:
+        raise ValueError("config['dbscan_top_n'] must be >= 1")
+
     parallel_n_jobs = normalized.get("parallel_n_jobs")
     if not isinstance(parallel_n_jobs, int):
         raise TypeError("config['parallel_n_jobs'] must be an int")
@@ -410,40 +428,94 @@ def _tune_dbscan(
     x_train: np.ndarray,
     ordered_train_mask: np.ndarray,
     cfg: Mapping[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, float]]]:
+) -> tuple[dict[str, Any], list[dict[str, float]], dict[str, Any]]:
     best: dict[str, Any] | None = None
     eps_grid = sorted({float(v) for v in cfg["dbscan_tuning_eps"]})
     min_samples_grid = sorted({int(v) for v in cfg["dbscan_tuning_min_samples"]})
     candidates = [(eps, min_samples) for eps in eps_grid for min_samples in min_samples_grid]
 
-    def _evaluate(eps: float, min_samples: int) -> dict[str, float]:
+    def _subsample(
+        sample_size: int,
+        random_state_offset: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if sample_size <= 0 or x_all.shape[0] <= sample_size:
+            return x_all, x_train, ordered_train_mask
+        rng = np.random.default_rng(seed=int(cfg["tuning_score_random_state"]) + random_state_offset)
+        sampled_idx = np.sort(rng.choice(np.arange(x_all.shape[0]), size=sample_size, replace=False))
+        x_sub_all = x_all[sampled_idx]
+        mask_sub = ordered_train_mask[sampled_idx]
+        x_sub_train = x_sub_all[mask_sub]
+        if x_sub_train.shape[0] == 0:
+            return x_sub_all, x_sub_all, np.ones(shape=(x_sub_all.shape[0],), dtype=bool)
+        return x_sub_all, x_sub_train, mask_sub
+
+    def _evaluate(
+        eval_x_all: np.ndarray,
+        eval_x_train: np.ndarray,
+        eval_train_mask: np.ndarray,
+        eps: float,
+        min_samples: int,
+    ) -> dict[str, float]:
         with threadpool_limits(limits=int(cfg["parallel_inner_threads"])):
             labels = _assign_dbscan_labels(
-                x_all,
-                x_train,
-                ordered_train_mask,
+                eval_x_all,
+                eval_x_train,
+                eval_train_mask,
                 eps=eps,
                 min_samples=min_samples,
                 n_jobs=1,
             )
         score = _safe_silhouette_score(
-            x_all,
+            eval_x_all,
             labels,
             sample_size=int(cfg["tuning_score_sample_size"]),
             random_state=int(cfg["tuning_score_random_state"]),
         )
         return {"eps": eps, "min_samples": float(min_samples), "silhouette_score": float(score)}
 
-    results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
-        delayed(_evaluate)(eps, min_samples) for eps, min_samples in candidates
+    stage1_x_all, stage1_x_train, stage1_train_mask = _subsample(int(cfg["dbscan_stage1_sample_size"]), 101)
+    stage1_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(stage1_x_all, stage1_x_train, stage1_train_mask, eps, min_samples) for eps, min_samples in candidates
     )
-    for row in results:
+
+    stage1_sorted = sorted(stage1_results, key=lambda row: float(row["silhouette_score"]), reverse=True)
+    top_n = min(int(cfg["dbscan_top_n"]), len(stage1_sorted))
+    survivors = [(float(row["eps"]), int(row["min_samples"])) for row in stage1_sorted[:top_n]]
+
+    stage2_x_all, stage2_x_train, stage2_train_mask = _subsample(int(cfg["dbscan_stage2_sample_size"]), 202)
+    stage2_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+        delayed(_evaluate)(stage2_x_all, stage2_x_train, stage2_train_mask, eps, min_samples) for eps, min_samples in survivors
+    )
+
+    final_results: list[dict[str, float]] = []
+    run_final_pass = int(cfg["dbscan_stage2_sample_size"]) < int(x_all.shape[0])
+    if run_final_pass and survivors:
+        final_results = Parallel(n_jobs=int(cfg["parallel_n_jobs"]), backend=str(cfg["parallel_backend"]))(
+            delayed(_evaluate)(x_all, x_train, ordered_train_mask, eps, min_samples) for eps, min_samples in survivors
+        )
+
+    best_rows = final_results if final_results else stage2_results
+    for row in best_rows:
         score = float(row["silhouette_score"])
         if best is None or score > float(best["silhouette_score"]):
             best = {"eps": float(row["eps"]), "min_samples": int(row["min_samples"]), "silhouette_score": score}
     if best is None:
         best = {"eps": float(cfg["dbscan_eps"]), "min_samples": int(cfg["dbscan_min_samples"]), "silhouette_score": -1.0}
-    return best, results
+
+    aggregated: dict[tuple[float, int], dict[str, float]] = {}
+    for rows in (stage1_results, stage2_results, final_results):
+        for row in rows:
+            key = (float(row["eps"]), int(row["min_samples"]))
+            aggregated[key] = {"eps": key[0], "min_samples": float(key[1]), "silhouette_score": float(row["silhouette_score"])}
+    merged_results = list(aggregated.values())
+
+    staged_results: dict[str, Any] = {
+        "stage1": stage1_results,
+        "stage2": stage2_results,
+        "final": final_results,
+        "survivors": [{"eps": eps, "min_samples": min_samples} for eps, min_samples in survivors],
+    }
+    return best, merged_results, staged_results
 
 
 def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd.DataFrame:
@@ -490,6 +562,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
     dbscan_choice: dict[str, Any] | None = None
     kmeans_results: list[dict[str, float]] = []
     dbscan_results: list[dict[str, float]] = []
+    dbscan_staged_results: dict[str, Any] = {}
 
     if run_kmeans:
         if isinstance(artifact_kmeans, dict) and "n_clusters" in artifact_kmeans:
@@ -504,8 +577,11 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
         if isinstance(artifact_dbscan, dict) and {"eps", "min_samples"}.issubset(artifact_dbscan.keys()):
             dbscan_choice = {"eps": float(artifact_dbscan["eps"]), "min_samples": int(artifact_dbscan["min_samples"])}
             dbscan_results = [dict(v) for v in artifact.get("dbscan_results", [])] if isinstance(artifact, dict) else []
+            dbscan_staged_results = (
+                dict(artifact.get("dbscan_staged_results", {})) if isinstance(artifact, dict) else {}
+            )
         elif bool(tuned_cfg["auto_tune"]):
-            dbscan_choice, dbscan_results = _tune_dbscan(x_all, x_train, ordered_train_mask, tuned_cfg)
+            dbscan_choice, dbscan_results, dbscan_staged_results = _tune_dbscan(x_all, x_train, ordered_train_mask, tuned_cfg)
         else:
             dbscan_choice = {"eps": float(tuned_cfg["dbscan_eps"]), "min_samples": int(tuned_cfg["dbscan_min_samples"])}
 
@@ -525,6 +601,7 @@ def run(df_or_path: pd.DataFrame, config: Mapping[str, Any] | None = None) -> pd
                 "min_samples": int(dbscan_choice["min_samples"]),
             }
             artifact_payload["dbscan_results"] = dbscan_results
+            artifact_payload["dbscan_staged_results"] = dbscan_staged_results
         _write_tuning_artifact(artifact_path, artifact_payload)
 
     if run_kmeans and kmeans_results:
