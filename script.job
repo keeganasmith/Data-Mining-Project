@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --job-name=whateva
+#SBATCH --time=02:00:00 --mem=300G
+#SBATCH --ntasks=1 --nodes=1 --cpus-per-task=192
+#SBATCH --output=out.%j --error=error.%j
+#SBATCH --partition=cpu 
+
+
+module purge
+cd /scratch/user/u.ks124812/Data-Mining-Project
+source modules.sh
+source venv/bin/activate
+bash run_script.sh
+

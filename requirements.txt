@@ -3,3 +3,5 @@ numpy
 joblib
 scikit-learn
 matplotlib
+pyarrow
+fastparquet

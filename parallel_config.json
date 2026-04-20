@@ -1,0 +1,8 @@
+{
+  "06c_build_features_clustering": {
+    "parallel_n_jobs": 192,
+    "parallel_backend": "loky",
+    "parallel_inner_threads": 1,
+    "auto_tune": true
+  }
+}
