@@ -45,10 +45,30 @@ TEMPORAL_ROLLING_DEFAULTS: dict[str, Any] = {
     "paired_stats_min_numeric_coverage": 0.8,
 }
 
+# Defaults for Step 06c (optional leakage-safe clustering features)
+CLUSTERING_DEFAULTS: dict[str, Any] = {
+    # Which clustering algorithm(s) to run: "kmeans", "dbscan", or "both".
+    "method": "kmeans",
+    # Prefixes that define eligible leakage-safe source columns.
+    "source_feature_prefixes": ["elo_", "temporal_"],
+    # Fraction of temporally earliest rows used to fit clustering models when fit_scope="train_only".
+    "train_fraction": 0.8,
+    # Leakage policy: "train_only" fits on earliest training slice only; "all_data" fits on full table (not leakage-safe).
+    "fit_scope": "train_only",
+    # KMeans knobs.
+    "kmeans_n_clusters": 8,
+    "kmeans_random_state": 42,
+    "kmeans_n_init": 10,
+    # DBSCAN knobs.
+    "dbscan_eps": 0.9,
+    "dbscan_min_samples": 25,
+}
+
 
 PIPELINE_DEFAULTS: dict[str, dict[str, Any]] = {
     "06_build_features_temporal_elo": ELO_DEFAULTS,
     "06b_build_features_temporal_rolling": TEMPORAL_ROLLING_DEFAULTS,
+    "06c_build_features_clustering": CLUSTERING_DEFAULTS,
     "experiments": DEFAULT_EXPERIMENT_CONFIG,
     # Includes optional `profile` (e.g. "fast") for low-cost training diagnostics.
     "model_training": DEFAULT_MODEL_TRAINING_CONFIG,

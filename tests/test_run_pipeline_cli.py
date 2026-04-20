@@ -13,6 +13,53 @@ from tennis_pipeline.cli import run_pipeline as rp
 
 
 class RunPipelineCliTests(unittest.TestCase):
+    def test_clustering_method_reaches_step_config(self) -> None:
+        seen_step_configs: dict[str, dict[str, object]] = {}
+        real_import_module = importlib.import_module
+
+        def fake_import_module(name: str):
+            if not name.startswith("tennis_pipeline.steps."):
+                return real_import_module(name)
+            step_name = name.rsplit(".", 1)[-1]
+
+            def _run(_current, config=None):
+                seen_step_configs[step_name] = dict(config or {})
+                return pd.DataFrame(
+                    {
+                        "event_id": ["e1", "e2"],
+                        "match_id": ["m1", "m2"],
+                        "match_date": ["2024-01-01", "2024-01-02"],
+                        "match_seq": [1, 2],
+                        "team1_player_id": ["p1", "p2"],
+                        "team2_player_id": ["q1", "q2"],
+                        "team1_wins": [1, 0],
+                    }
+                )
+
+            return SimpleNamespace(run=_run)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "input.csv"
+            input_path.write_text("a\n1\n", encoding="utf-8")
+            with (
+                patch.object(
+                    rp,
+                    "STEP_MODULES",
+                    ("01_load_raw", "06c_build_features_clustering", "07_finalize_model_table"),
+                ),
+                patch.object(rp.importlib, "import_module", side_effect=fake_import_module),
+                patch.object(rp, "run_stage_checks"),
+                patch.object(rp, "run_model_training_experiments", return_value={}),
+                patch.object(pd.DataFrame, "to_parquet", return_value=None),
+            ):
+                rp.run_pipeline(
+                    input_path=input_path,
+                    output_dir=tmpdir,
+                    clustering_method="both",
+                )
+
+        self.assertEqual("both", seen_step_configs["06c_build_features_clustering"]["method"])
+
     def test_feature_set_mode_enables_debug_leakage_for_training(self) -> None:
         calls: list[dict[str, object]] = []
 
@@ -42,7 +89,9 @@ class RunPipelineCliTests(unittest.TestCase):
             calls.append({"kind": "baseline", "config": dict(config or {}), "output_dir": str(output_dir)})
             return {}
 
-        def fake_run_feature_set_training_experiment(_feature_set_tables, *, output_dir, config=None):
+        def fake_run_feature_set_training_experiment(
+            _feature_set_tables, *, output_dir, config=None, start_run_index=None, total_runs=None
+        ):
             calls.append({"kind": "feature_sets", "config": dict(config or {}), "output_dir": str(output_dir)})
             return {}
 
