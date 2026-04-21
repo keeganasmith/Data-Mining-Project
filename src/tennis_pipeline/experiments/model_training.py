@@ -278,11 +278,24 @@ def run_full_feature_hyperparameter_tuning_experiment(
     for model_name, group in results_df.groupby("model", sort=False):
         best_row = group.sort_values(by=["validation_log_loss", "validation_accuracy"], ascending=[True, False], kind="stable").iloc[0].to_dict()
         best_rows.append(best_row)
-        model_plot_df = group.sort_values(by=["max_depth", "validation_log_loss"], kind="stable")
+        model_plot_df = (
+            group.sort_values(
+                by=["max_depth", "n_estimators", "validation_log_loss", "validation_accuracy"],
+                ascending=[True, True, True, False],
+                kind="stable",
+            )
+            .groupby(["max_depth", "n_estimators"], as_index=False, sort=True)
+            .first()
+        )
         fig, ax = plt.subplots(figsize=(8, 5))
         for depth, depth_slice in model_plot_df.groupby("max_depth", sort=True):
-            ax.plot(depth_slice["n_estimators"], depth_slice["validation_log_loss"], marker="o", label=f"depth={int(depth)}")
-        ax.set_title(f"{model_name} tuning sweep (full features)")
+            ax.plot(
+                depth_slice["n_estimators"],
+                depth_slice["validation_log_loss"],
+                marker="o",
+                label=f"depth={int(depth)}",
+            )
+        ax.set_title(f"{model_name} tuning sweep (full features, best across other params)")
         ax.set_xlabel("n_estimators")
         ax.set_ylabel("validation log loss")
         ax.grid(alpha=0.3)
