@@ -245,6 +245,8 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             self.assertTrue((tuning_dir / "hyperparameter_tuning_best_log_loss.png").exists())
             self.assertTrue((tuning_dir / "hyperparameter_tuning_curve__random_forest.png").exists())
             self.assertTrue((tuning_dir / "hyperparameter_tuning_curve__gbdt.png").exists())
+            tuning_results_df = pd.read_csv(tuning_dir / "hyperparameter_tuning_results.csv")
+            self.assertIn("training_accuracy", tuning_results_df.columns)
             run_manifest = manifests["data_plus_temporal_elo_clustering"]["full_feature_hyperparameter_tuning"]
             self.assertEqual("completed", run_manifest.get("status"))
             self.assertIn("artifacts", run_manifest)
