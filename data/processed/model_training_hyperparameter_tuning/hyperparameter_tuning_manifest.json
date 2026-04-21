@@ -1,0 +1,42 @@
+{
+  "status": "completed",
+  "feature_set_name": "data_plus_temporal_elo_clustering",
+  "rows_evaluated": 57,
+  "time_budget_seconds": 900.0,
+  "elapsed_seconds": 916.3532010179479,
+  "best_models": [
+    {
+      "model": "gbdt",
+      "max_depth": 3,
+      "min_samples_leaf": 5,
+      "n_estimators": 100,
+      "validation_accuracy": 0.6527521441754424,
+      "validation_log_loss": 0.6161143279280178,
+      "elapsed_fit_seconds": 20.513080363161862,
+      "elapsed_total_seconds": 201.28144460101612,
+      "learning_rate": 0.1,
+      "subsample": 0.7
+    },
+    {
+      "model": "random_forest",
+      "max_depth": 9,
+      "min_samples_leaf": 5,
+      "n_estimators": 300,
+      "validation_accuracy": 0.6539463684724786,
+      "validation_log_loss": 0.6164556097458211,
+      "elapsed_fit_seconds": 1.182680906029418,
+      "elapsed_total_seconds": 27.161978038959205,
+      "learning_rate": NaN,
+      "subsample": NaN
+    }
+  ],
+  "artifacts": {
+    "results_csv": "data/processed/model_training_hyperparameter_tuning/hyperparameter_tuning_results.csv",
+    "best_csv": "data/processed/model_training_hyperparameter_tuning/hyperparameter_tuning_best.csv",
+    "best_log_loss_plot": "data/processed/model_training_hyperparameter_tuning/hyperparameter_tuning_best_log_loss.png",
+    "model_curve_plots": [
+      "data/processed/model_training_hyperparameter_tuning/hyperparameter_tuning_curve__gbdt.png",
+      "data/processed/model_training_hyperparameter_tuning/hyperparameter_tuning_curve__random_forest.png"
+    ]
+  }
+}

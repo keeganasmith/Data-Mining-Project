@@ -119,12 +119,12 @@
       8
     ],
     "stopped_early": false,
-    "elapsed_seconds": 11.025648392969742,
+    "elapsed_seconds": 10.853352129925042,
     "time_budget_seconds": 1800.0
   },
   "kmeans_tuning_metadata": {
     "stopped_early": false,
-    "elapsed_seconds": 11.025648392969742,
+    "elapsed_seconds": 10.853352129925042,
     "time_budget_seconds": 1800.0
   }
 }
