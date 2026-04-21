@@ -39,6 +39,16 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "market_team2_implied_prob_column": None,
     "market_payout_convention": "decimal",
     "market_edge_bucket_count": 10,
+    "run_full_feature_hyperparameter_tuning": True,
+    "hyperparameter_tuning_full_feature_set_name": "data_plus_temporal_elo_clustering",
+    "hyperparameter_tuning_output_subdir": "model_training_hyperparameter_tuning",
+    "hyperparameter_tuning_time_budget_seconds": 900.0,
+    "hyperparameter_tuning_models": ["random_forest", "gbdt"],
+    "hyperparameter_tuning_max_depth": [3, 5, 7, 9],
+    "hyperparameter_tuning_min_samples_leaf": [5, 10, 20],
+    "hyperparameter_tuning_n_estimators": [100, 200, 300],
+    "hyperparameter_tuning_learning_rate": [0.03, 0.05, 0.1],
+    "hyperparameter_tuning_subsample": [0.7, 0.85, 1.0],
 }
 
 MODEL_TRAINING_PROFILES: dict[str, dict[str, Any]] = {
@@ -67,8 +77,14 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         raise TypeError("model_training config['debug_leakage'] must be a bool")
     if not isinstance(cfg.get("verbose_training"), bool):
         raise TypeError("model_training config['verbose_training'] must be a bool")
+    if not isinstance(cfg.get("run_full_feature_hyperparameter_tuning"), bool):
+        raise TypeError("model_training config['run_full_feature_hyperparameter_tuning'] must be a bool")
 
     for key in ("target_column", "output_subdir", "date_column", "profile"):
+        value = cfg.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise TypeError(f"model_training config['{key}'] must be a non-empty string")
+    for key in ("hyperparameter_tuning_full_feature_set_name", "hyperparameter_tuning_output_subdir"):
         value = cfg.get(key)
         if not isinstance(value, str) or not value.strip():
             raise TypeError(f"model_training config['{key}'] must be a non-empty string")
@@ -123,7 +139,189 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     cfg["market_edge_bucket_count"] = int(cfg["market_edge_bucket_count"])
     if cfg["market_edge_bucket_count"] < 2:
         raise ValueError("model_training config['market_edge_bucket_count'] must be >= 2")
+    cfg["hyperparameter_tuning_time_budget_seconds"] = float(cfg["hyperparameter_tuning_time_budget_seconds"])
+    if cfg["hyperparameter_tuning_time_budget_seconds"] <= 0:
+        raise ValueError("model_training config['hyperparameter_tuning_time_budget_seconds'] must be > 0")
+    for key in (
+        "hyperparameter_tuning_max_depth",
+        "hyperparameter_tuning_min_samples_leaf",
+        "hyperparameter_tuning_n_estimators",
+        "hyperparameter_tuning_learning_rate",
+        "hyperparameter_tuning_subsample",
+    ):
+        value = cfg.get(key)
+        if not isinstance(value, list) or not value:
+            raise TypeError(f"model_training config['{key}'] must be a non-empty list")
+    models = cfg.get("hyperparameter_tuning_models")
+    if not isinstance(models, list) or not models:
+        raise TypeError("model_training config['hyperparameter_tuning_models'] must be a non-empty list[str]")
+    cfg["hyperparameter_tuning_models"] = [str(v).strip().lower() for v in models if str(v).strip()]
+    if any(v not in {"random_forest", "gbdt"} for v in cfg["hyperparameter_tuning_models"]):
+        raise ValueError("model_training config['hyperparameter_tuning_models'] supports only: random_forest, gbdt")
     return cfg
+
+
+def run_full_feature_hyperparameter_tuning_experiment(
+    feature_set_tables: Mapping[str, pd.DataFrame],
+    *,
+    output_dir: str | Path,
+    config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Tune tree model hyperparameters on the fully featured table and emit visual artifacts."""
+    cfg = _normalize_config(config)
+    if not cfg["run_full_feature_hyperparameter_tuning"]:
+        return {}
+
+    try:
+        import matplotlib
+        from sklearn.compose import ColumnTransformer
+        from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+        from sklearn.impute import SimpleImputer
+        from sklearn.metrics import accuracy_score, log_loss
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import OneHotEncoder
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("hyperparameter tuning requires optional dependencies: scikit-learn and matplotlib") from exc
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    feature_set_name = str(cfg["hyperparameter_tuning_full_feature_set_name"])
+    full_df = feature_set_tables.get(feature_set_name)
+    output_path = Path(output_dir) / str(cfg["hyperparameter_tuning_output_subdir"])
+    output_path.mkdir(parents=True, exist_ok=True)
+    if full_df is None:
+        return {
+            "status": "skipped",
+            "reason": f"feature set not found: {feature_set_name}",
+        }
+
+    target_column = str(cfg["target_column"])
+    id_columns = [c for c in cfg["id_columns"] if c in full_df.columns]
+    feature_columns = [c for c in full_df.columns if c not in set(id_columns) and c != target_column]
+    model_df = full_df.loc[:, [*id_columns, *feature_columns, target_column]].dropna(subset=[target_column]).copy(deep=True)
+    train_df, val_df, _ = _temporal_split(
+        model_df,
+        date_column=str(cfg["date_column"]),
+        test_size=float(cfg["test_size"]),
+        validation_size=float(cfg["validation_size"]),
+    )
+    x_train, y_train = train_df.drop(columns=[target_column]), train_df[target_column].astype(int)
+    x_val, y_val = val_df.drop(columns=[target_column]), val_df[target_column].astype(int)
+    if id_columns:
+        x_train = x_train.drop(columns=id_columns, errors="ignore")
+        x_val = x_val.drop(columns=id_columns, errors="ignore")
+
+    numeric_columns = x_train.select_dtypes(include=[np.number, "bool"]).columns.tolist()
+    categorical_columns = [c for c in x_train.columns if c not in set(numeric_columns)]
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))]), numeric_columns),
+            ("cat", Pipeline(steps=[("imputer", SimpleImputer(strategy="most_frequent")), ("encoder", OneHotEncoder(handle_unknown="ignore"))]), categorical_columns),
+        ]
+    )
+
+    tuning_rows: list[dict[str, Any]] = []
+    started = time.perf_counter()
+    budget_seconds = float(cfg["hyperparameter_tuning_time_budget_seconds"])
+    model_candidates: dict[str, list[dict[str, Any]]] = {"random_forest": [], "gbdt": []}
+    for depth in sorted({int(v) for v in cfg["hyperparameter_tuning_max_depth"]}):
+        for leaf in sorted({int(v) for v in cfg["hyperparameter_tuning_min_samples_leaf"]}):
+            for estimators in sorted({int(v) for v in cfg["hyperparameter_tuning_n_estimators"]}):
+                model_candidates["random_forest"].append(
+                    {"max_depth": depth, "min_samples_leaf": leaf, "n_estimators": estimators}
+                )
+                for learning_rate in sorted({float(v) for v in cfg["hyperparameter_tuning_learning_rate"]}):
+                    for subsample in sorted({float(v) for v in cfg["hyperparameter_tuning_subsample"]}):
+                        model_candidates["gbdt"].append(
+                            {
+                                "max_depth": depth,
+                                "min_samples_leaf": leaf,
+                                "n_estimators": estimators,
+                                "learning_rate": learning_rate,
+                                "subsample": subsample,
+                            }
+                        )
+
+    for model_name in [m for m in cfg["hyperparameter_tuning_models"] if m in model_candidates]:
+        for params in model_candidates[model_name]:
+            elapsed = time.perf_counter() - started
+            if elapsed >= budget_seconds:
+                break
+            if model_name == "random_forest":
+                model = RandomForestClassifier(random_state=int(cfg["random_state"]), n_jobs=-1, **params)
+            else:
+                model = GradientBoostingClassifier(random_state=int(cfg["random_state"]), **params)
+            pipeline = Pipeline(steps=[("prep", preprocessor), ("model", model)])
+            fit_started = time.perf_counter()
+            pipeline.fit(x_train, y_train)
+            val_pred = pipeline.predict(x_val)
+            val_proba = np.clip(pipeline.predict_proba(x_val)[:, 1], 1e-15, 1.0 - 1e-15)
+            tuning_rows.append(
+                {
+                    "model": model_name,
+                    **params,
+                    "validation_accuracy": float(accuracy_score(y_val, val_pred)),
+                    "validation_log_loss": float(log_loss(y_val, val_proba, labels=[0, 1])),
+                    "elapsed_fit_seconds": float(time.perf_counter() - fit_started),
+                    "elapsed_total_seconds": float(time.perf_counter() - started),
+                }
+            )
+
+    results_df = pd.DataFrame(tuning_rows)
+    if results_df.empty:
+        manifest = {"status": "stopped_early", "reason": "time budget exhausted before first fit"}
+        (output_path / "hyperparameter_tuning_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return manifest
+
+    best_rows: list[dict[str, Any]] = []
+    for model_name, group in results_df.groupby("model", sort=False):
+        best_row = group.sort_values(by=["validation_log_loss", "validation_accuracy"], ascending=[True, False], kind="stable").iloc[0].to_dict()
+        best_rows.append(best_row)
+        model_plot_df = group.sort_values(by=["max_depth", "validation_log_loss"], kind="stable")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for depth, depth_slice in model_plot_df.groupby("max_depth", sort=True):
+            ax.plot(depth_slice["n_estimators"], depth_slice["validation_log_loss"], marker="o", label=f"depth={int(depth)}")
+        ax.set_title(f"{model_name} tuning sweep (full features)")
+        ax.set_xlabel("n_estimators")
+        ax.set_ylabel("validation log loss")
+        ax.grid(alpha=0.3)
+        ax.legend(title="max_depth")
+        fig.tight_layout()
+        fig.savefig(output_path / f"hyperparameter_tuning_curve__{model_name}.png", bbox_inches="tight")
+        plt.close(fig)
+
+    results_df = results_df.sort_values(by=["model", "validation_log_loss", "validation_accuracy"], ascending=[True, True, False], kind="stable")
+    results_df.to_csv(output_path / "hyperparameter_tuning_results.csv", index=False)
+
+    best_df = pd.DataFrame(best_rows).sort_values(by="model", kind="stable")
+    best_df.to_csv(output_path / "hyperparameter_tuning_best.csv", index=False)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(best_df["model"], best_df["validation_log_loss"])
+    ax.set_title("Best validation log loss by model")
+    ax.set_xlabel("model")
+    ax.set_ylabel("validation log loss")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path / "hyperparameter_tuning_best_log_loss.png", bbox_inches="tight")
+    plt.close(fig)
+
+    manifest = {
+        "status": "completed",
+        "feature_set_name": feature_set_name,
+        "rows_evaluated": int(len(results_df)),
+        "time_budget_seconds": budget_seconds,
+        "elapsed_seconds": float(time.perf_counter() - started),
+        "best_models": best_df.to_dict(orient="records"),
+        "artifacts": {
+            "results_csv": str(output_path / "hyperparameter_tuning_results.csv"),
+            "best_csv": str(output_path / "hyperparameter_tuning_best.csv"),
+            "best_log_loss_plot": str(output_path / "hyperparameter_tuning_best_log_loss.png"),
+            "model_curve_plots": [str(output_path / f"hyperparameter_tuning_curve__{name}.png") for name in best_df["model"]],
+        },
+    }
+    (output_path / "hyperparameter_tuning_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
 
 
 def _market_probability_from_odds(odds: pd.Series) -> pd.Series:
@@ -913,4 +1111,12 @@ def run_feature_set_training_experiment(
             artifacts["feature_set_probability_metric_comparison_plot"] = str(comparison_plot)
             artifacts["feature_set_pricing_metric_comparison_csv"] = str(legacy_summary_csv)
             artifacts["feature_set_pricing_metric_comparison_plot"] = str(legacy_comparison_plot)
+    hyperparameter_manifest = run_full_feature_hyperparameter_tuning_experiment(
+        feature_set_tables,
+        output_dir=output_dir,
+        config=config,
+    )
+    if hyperparameter_manifest:
+        for run_manifest in manifests.values():
+            run_manifest["full_feature_hyperparameter_tuning"] = hyperparameter_manifest
     return manifests

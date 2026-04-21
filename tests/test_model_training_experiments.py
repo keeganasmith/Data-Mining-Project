@@ -199,6 +199,55 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
             artifacts = manifests["structured_only"].get("artifacts", {})
             self.assertIn("feature_set_pricing_metric_comparison_csv", artifacts)
             self.assertIn("feature_set_pricing_metric_comparison_plot", artifacts)
+            self.assertIn("full_feature_hyperparameter_tuning", manifests["structured_only"])
+
+    def test_full_feature_hyperparameter_tuning_writes_visual_artifacts(self) -> None:
+        rows = []
+        for i in range(160):
+            rows.append(
+                {
+                    "event_id": f"e{i//4}",
+                    "match_id": f"m{i}",
+                    "match_date": f"2024-04-{(i % 28) + 1:02d}",
+                    "match_seq": i,
+                    "team1_player_id": f"p{i}",
+                    "team2_player_id": f"q{i}",
+                    "surface_context": "Clay" if i % 2 == 0 else "Hard",
+                    "rank_diff": (i % 13) - 6,
+                    "elo_diff_team1": (i % 27) - 13,
+                    "temporal_recent_win_rate_team1": (i % 10) / 10.0,
+                    "cluster_kmeans_label": i % 5,
+                    "team1_wins": 1 if i % 5 in (1, 2, 4) else 0,
+                }
+            )
+
+        full_df = pd.DataFrame(rows)
+        feature_set_tables = {"data_plus_temporal_elo_clustering": full_df}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifests = run_feature_set_training_experiment(
+                feature_set_tables,
+                output_dir=tmpdir,
+                config={
+                    "depth_values": [2],
+                    "rf_n_estimators": 20,
+                    "gbdt_n_estimators": 20,
+                    "hyperparameter_tuning_time_budget_seconds": 120,
+                    "hyperparameter_tuning_n_estimators": [10, 20],
+                    "hyperparameter_tuning_max_depth": [2, 4],
+                    "hyperparameter_tuning_min_samples_leaf": [2, 5],
+                    "hyperparameter_tuning_learning_rate": [0.05],
+                    "hyperparameter_tuning_subsample": [0.8],
+                },
+            )
+            tuning_dir = Path(tmpdir) / "model_training_hyperparameter_tuning"
+            self.assertTrue((tuning_dir / "hyperparameter_tuning_manifest.json").exists())
+            self.assertTrue((tuning_dir / "hyperparameter_tuning_results.csv").exists())
+            self.assertTrue((tuning_dir / "hyperparameter_tuning_best_log_loss.png").exists())
+            self.assertTrue((tuning_dir / "hyperparameter_tuning_curve__random_forest.png").exists())
+            self.assertTrue((tuning_dir / "hyperparameter_tuning_curve__gbdt.png").exists())
+            run_manifest = manifests["data_plus_temporal_elo_clustering"]["full_feature_hyperparameter_tuning"]
+            self.assertEqual("completed", run_manifest.get("status"))
+            self.assertIn("artifacts", run_manifest)
 
     def test_market_pricing_evaluation_metrics_from_synthetic_inputs(self) -> None:
         y_test = pd.Series([1, 0, 1, 0], dtype=int)
