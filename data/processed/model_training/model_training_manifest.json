@@ -42,8 +42,8 @@
       "test_accuracy": 0.648083812832483,
       "test_roc_auc": 0.7072163697775284,
       "test_log_loss": 0.6237172535617885,
-      "test_brier_score": 0.21747259355228432,
-      "test_ece_10_bins": 0.02032843749843092
+      "test_brier_score": 0.2174725935522843,
+      "test_ece_10_bins": 0.020328437498430916
     },
     {
       "model": "gbdt",

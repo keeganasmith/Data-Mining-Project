@@ -43,7 +43,7 @@
       "test_roc_auc": 0.6895995997568828,
       "test_log_loss": 0.6375624853475143,
       "test_brier_score": 0.2235365999782288,
-      "test_ece_10_bins": 0.03441391312523195
+      "test_ece_10_bins": 0.03441391312523196
     },
     {
       "model": "gbdt",
