@@ -39,6 +39,7 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "market_team2_implied_prob_column": None,
     "market_payout_convention": "decimal",
     "market_edge_bucket_count": 10,
+    "training_models": ["decision_tree", "random_forest", "gbdt"],
     "run_full_feature_hyperparameter_tuning": True,
     "hyperparameter_tuning_full_feature_set_name": "data_plus_temporal_elo_clustering",
     "hyperparameter_tuning_output_subdir": "model_training_hyperparameter_tuning",
@@ -109,6 +110,13 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         value = cfg.get(key)
         if not isinstance(value, list) or not value:
             raise TypeError(f"model_training config['{key}'] must be a non-empty list")
+    if not isinstance(cfg.get("training_models"), list) or not cfg["training_models"]:
+        raise TypeError("model_training config['training_models'] must be a non-empty list[str]")
+    cfg["training_models"] = [str(v).strip().lower() for v in cfg["training_models"] if str(v).strip()]
+    if any(v not in {"decision_tree", "random_forest", "gbdt"} for v in cfg["training_models"]):
+        raise ValueError(
+            "model_training config['training_models'] supports only: decision_tree, random_forest, gbdt"
+        )
 
     cfg["depth_values"] = sorted({int(v) for v in cfg["depth_values"] if int(v) > 0})
     if not cfg["depth_values"]:
@@ -733,6 +741,10 @@ def run_model_training_experiments(
             random_state=cfg["random_state"],
         ),
     }
+    selected_models = [name for name in cfg["training_models"] if name in model_specs]
+    if not selected_models:
+        raise ValueError("model_training config['training_models'] did not match any supported models")
+    model_specs = {name: model_specs[name] for name in selected_models}
 
     def _calibration_table(
         y_true: pd.Series,
@@ -1004,6 +1016,21 @@ def run_feature_set_training_experiment(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    hyperparameter_manifest = run_full_feature_hyperparameter_tuning_experiment(
+        feature_set_tables,
+        output_dir=output_dir,
+        config=config,
+    )
+    tuned_best_row: dict[str, Any] | None = None
+    if hyperparameter_manifest.get("status") == "completed":
+        best_models = hyperparameter_manifest.get("best_models")
+        if isinstance(best_models, list) and best_models:
+            tuned_best_row = min(
+                [row for row in best_models if isinstance(row, Mapping)],
+                key=lambda row: float(row.get("validation_log_loss", np.inf)),
+                default=None,
+            )
+
     manifests: dict[str, Any] = {}
     run_summary_rows: list[dict[str, Any]] = []
     feature_set_count = len(feature_set_tables)
@@ -1018,6 +1045,29 @@ def run_feature_set_training_experiment(
         start_perf = time.perf_counter()
         print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
         run_config = dict(config or {})
+        if tuned_best_row is not None:
+            best_model = str(tuned_best_row.get("model", "")).strip().lower()
+            if best_model in {"random_forest", "gbdt"}:
+                run_config["training_models"] = [best_model]
+                run_config["depth_values"] = [int(tuned_best_row.get("max_depth", run_config.get("depth_values", [8])[0]))]
+                n_estimators_key = "rf_n_estimators" if best_model == "random_forest" else "gbdt_n_estimators"
+                run_config[n_estimators_key] = int(
+                    tuned_best_row.get("n_estimators", run_config.get(n_estimators_key, 300))
+                )
+                if best_model == "random_forest":
+                    run_config["rf_min_samples_leaf"] = int(
+                        tuned_best_row.get("min_samples_leaf", run_config.get("rf_min_samples_leaf", 15))
+                    )
+                else:
+                    run_config["gbdt_min_samples_leaf"] = int(
+                        tuned_best_row.get("min_samples_leaf", run_config.get("gbdt_min_samples_leaf", 20))
+                    )
+                    run_config["gbdt_learning_rate"] = float(
+                        tuned_best_row.get("learning_rate", run_config.get("gbdt_learning_rate", 0.05))
+                    )
+                    run_config["gbdt_subsample"] = float(
+                        tuned_best_row.get("subsample", run_config.get("gbdt_subsample", 0.8))
+                    )
         run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
         run_manifest = run_model_training_experiments(
             feature_set_df,
@@ -1126,11 +1176,6 @@ def run_feature_set_training_experiment(
             artifacts["feature_set_probability_metric_comparison_plot"] = str(comparison_plot)
             artifacts["feature_set_pricing_metric_comparison_csv"] = str(legacy_summary_csv)
             artifacts["feature_set_pricing_metric_comparison_plot"] = str(legacy_comparison_plot)
-    hyperparameter_manifest = run_full_feature_hyperparameter_tuning_experiment(
-        feature_set_tables,
-        output_dir=output_dir,
-        config=config,
-    )
     if hyperparameter_manifest:
         for run_manifest in manifests.values():
             run_manifest["full_feature_hyperparameter_tuning"] = hyperparameter_manifest
