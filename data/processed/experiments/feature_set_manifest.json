@@ -30,7 +30,6 @@
     "abs_diff_sglrollpoints",
     "abs_diff_sglrolltie",
     "abs_diff_weightlb",
-    "cluster_kmeans_id",
     "diff_age",
     "diff_backhand",
     "diff_dblrollpoints",
@@ -52,13 +51,7 @@
     "same_playerfirstnamefull",
     "same_playerlastname",
     "same_playhand",
-    "same_rankdate",
-    "temporal_team1_rolling_avg_elo",
-    "temporal_team1_rolling_avg_sgl_roll_rank",
-    "temporal_team1_rolling_win_pct",
-    "temporal_team2_rolling_avg_elo",
-    "temporal_team2_rolling_avg_sgl_roll_rank",
-    "temporal_team2_rolling_win_pct"
+    "same_rankdate"
   ],
   "elo_feature_columns": [
     "elo_team1_pre",
@@ -66,12 +59,16 @@
     "elo_diff_team1",
     "elo_prob_team1_pre"
   ],
+  "temporal_feature_columns": [],
+  "clustering_feature_columns": [
+    "cluster_kmeans_id"
+  ],
   "feature_sets": [
     {
-      "name": "structured_only",
-      "output_path": "data/processed/experiments/model_table__structured_only.parquet",
+      "name": "data_only",
+      "output_path": "data/processed/experiments/model_table__data_only.parquet",
       "row_count": 92112,
-      "feature_count": 49,
+      "feature_count": 42,
       "feature_columns": [
         "rank_diff",
         "abs_rank_diff",
@@ -93,7 +90,6 @@
         "abs_diff_sglrollpoints",
         "abs_diff_sglrolltie",
         "abs_diff_weightlb",
-        "cluster_kmeans_id",
         "diff_age",
         "diff_backhand",
         "diff_dblrollpoints",
@@ -115,21 +111,17 @@
         "same_playerfirstnamefull",
         "same_playerlastname",
         "same_playhand",
-        "same_rankdate",
-        "temporal_team1_rolling_avg_elo",
-        "temporal_team1_rolling_avg_sgl_roll_rank",
-        "temporal_team1_rolling_win_pct",
-        "temporal_team2_rolling_avg_elo",
-        "temporal_team2_rolling_avg_sgl_roll_rank",
-        "temporal_team2_rolling_win_pct"
+        "same_rankdate"
       ],
-      "include_elo": false
+      "include_elo": false,
+      "include_temporal": false,
+      "include_clustering": false
     },
     {
-      "name": "structured_plus_elo",
-      "output_path": "data/processed/experiments/model_table__structured_plus_elo.parquet",
+      "name": "data_plus_temporal_elo_clustering",
+      "output_path": "data/processed/experiments/model_table__data_plus_temporal_elo_clustering.parquet",
       "row_count": 92112,
-      "feature_count": 53,
+      "feature_count": 47,
       "feature_columns": [
         "rank_diff",
         "abs_rank_diff",
@@ -177,15 +169,11 @@
         "same_playerfirstnamefull",
         "same_playerlastname",
         "same_playhand",
-        "same_rankdate",
-        "temporal_team1_rolling_avg_elo",
-        "temporal_team1_rolling_avg_sgl_roll_rank",
-        "temporal_team1_rolling_win_pct",
-        "temporal_team2_rolling_avg_elo",
-        "temporal_team2_rolling_avg_sgl_roll_rank",
-        "temporal_team2_rolling_win_pct"
+        "same_rankdate"
       ],
-      "include_elo": true
+      "include_elo": true,
+      "include_temporal": true,
+      "include_clustering": true
     }
   ]
 }

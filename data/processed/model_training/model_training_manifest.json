@@ -20,41 +20,41 @@
     "validation_rows": 18422,
     "test_rows": 18422,
     "target_column": "team1_wins",
-    "feature_count": 53
+    "feature_count": 47
   },
   "models": [
     {
       "model": "decision_tree",
       "best_depth": 8,
-      "train_accuracy_at_best_depth": 0.6840124484330897,
-      "validation_accuracy_at_best_depth": 0.642981218108783,
-      "test_accuracy": 0.6367386820106394,
-      "test_roc_auc": 0.693490091999031,
-      "test_log_loss": 0.6639305376294068,
-      "test_brier_score": 0.22396351072403045,
-      "test_ece_10_bins": 0.03942771879804
+      "train_accuracy_at_best_depth": 0.6836324817254107,
+      "validation_accuracy_at_best_depth": 0.6484095103680382,
+      "test_accuracy": 0.6398870915210075,
+      "test_roc_auc": 0.6946550336620101,
+      "test_log_loss": 0.656567556133655,
+      "test_brier_score": 0.2235763124622302,
+      "test_ece_10_bins": 0.037613860828752815
     },
     {
       "model": "random_forest",
       "best_depth": 8,
-      "train_accuracy_at_best_depth": 0.6887529854527031,
-      "validation_accuracy_at_best_depth": 0.6537292367821084,
-      "test_accuracy": 0.6466724568450766,
-      "test_roc_auc": 0.7068406232100484,
-      "test_log_loss": 0.6236105006247079,
-      "test_brier_score": 0.2175026658231649,
-      "test_ece_10_bins": 0.01790559817719349
+      "train_accuracy_at_best_depth": 0.6860570311934573,
+      "validation_accuracy_at_best_depth": 0.6542177830854413,
+      "test_accuracy": 0.648083812832483,
+      "test_roc_auc": 0.7072163697775284,
+      "test_log_loss": 0.6237172535617885,
+      "test_brier_score": 0.21747259355228432,
+      "test_ece_10_bins": 0.02032843749843092
     },
     {
       "model": "gbdt",
       "best_depth": 8,
-      "train_accuracy_at_best_depth": 0.8243106318303539,
-      "validation_accuracy_at_best_depth": 0.6492237542069265,
-      "test_accuracy": 0.6384214526110086,
-      "test_roc_auc": 0.6958364481997281,
-      "test_log_loss": 0.639005802666042,
-      "test_brier_score": 0.22332427643052205,
-      "test_ece_10_bins": 0.048903276044365784
+      "train_accuracy_at_best_depth": 0.8047332995585149,
+      "validation_accuracy_at_best_depth": 0.648192378677668,
+      "test_accuracy": 0.6403756378243405,
+      "test_roc_auc": 0.6959555597555329,
+      "test_log_loss": 0.6385868038019625,
+      "test_brier_score": 0.22319646856763442,
+      "test_ece_10_bins": 0.04533224891446121
     }
   ],
   "market_pricing_evaluation": {

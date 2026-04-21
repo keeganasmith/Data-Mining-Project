@@ -1,0 +1,79 @@
+{
+  "configuration": {
+    "profile": "default",
+    "random_state": 42,
+    "depth_values": [
+      8
+    ],
+    "rf_n_estimators": 300,
+    "gbdt_n_estimators": 300,
+    "gbdt_learning_rate": 0.05,
+    "dt_min_samples_leaf": 25,
+    "rf_min_samples_leaf": 15,
+    "gbdt_min_samples_leaf": 20,
+    "gbdt_subsample": 0.8,
+    "test_size": 0.2,
+    "validation_size": 0.2
+  },
+  "split": {
+    "train_rows": 55268,
+    "validation_rows": 18422,
+    "test_rows": 18422,
+    "target_column": "team1_wins",
+    "feature_count": 48
+  },
+  "models": [
+    {
+      "model": "decision_tree",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.6836324817254107,
+      "validation_accuracy_at_best_depth": 0.6484095103680382,
+      "test_accuracy": 0.6398870915210075,
+      "test_roc_auc": 0.6946433641478837,
+      "test_log_loss": 0.6634983618736374,
+      "test_brier_score": 0.22360801368902425,
+      "test_ece_10_bins": 0.03765077321611574
+    },
+    {
+      "model": "random_forest",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.6861113121516972,
+      "validation_accuracy_at_best_depth": 0.6526978612528499,
+      "test_accuracy": 0.6481380957550754,
+      "test_roc_auc": 0.7070089824729437,
+      "test_log_loss": 0.6238082278937236,
+      "test_brier_score": 0.21752539677654262,
+      "test_ece_10_bins": 0.020073325722664015
+    },
+    {
+      "model": "gbdt",
+      "best_depth": 8,
+      "train_accuracy_at_best_depth": 0.8072302236375479,
+      "validation_accuracy_at_best_depth": 0.649169471284334,
+      "test_accuracy": 0.6366301161654544,
+      "test_roc_auc": 0.6952251542577159,
+      "test_log_loss": 0.6388699888121905,
+      "test_brier_score": 0.22343412200157226,
+      "test_ece_10_bins": 0.04929164611742534
+    }
+  ],
+  "market_pricing_evaluation": {
+    "enabled": false,
+    "market_columns": [],
+    "payout_convention": "decimal",
+    "edge_bucket_count": 10,
+    "models": []
+  },
+  "artifacts": {
+    "depth_curve_csv": "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/depth_accuracy_curves.csv",
+    "summary_csv": "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/model_summary_metrics.csv",
+    "calibration_table_csv": "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/model_calibration_table.csv",
+    "match_probability_predictions_csv": "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/match_probability_predictions.csv",
+    "depth_accuracy_plot": "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/depth_accuracy_curves.png",
+    "roc_curve_plots": [
+      "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/roc_curve__decision_tree.png",
+      "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/roc_curve__random_forest.png",
+      "data/processed/model_training_feature_sets/data_plus_temporal_elo_clustering/roc_curve__gbdt.png"
+    ]
+  }
+}
