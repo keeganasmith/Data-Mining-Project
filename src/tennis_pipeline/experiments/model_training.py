@@ -255,12 +255,14 @@ def run_full_feature_hyperparameter_tuning_experiment(
             pipeline = Pipeline(steps=[("prep", preprocessor), ("model", model)])
             fit_started = time.perf_counter()
             pipeline.fit(x_train, y_train)
+            train_pred = pipeline.predict(x_train)
             val_pred = pipeline.predict(x_val)
             val_proba = np.clip(pipeline.predict_proba(x_val)[:, 1], 1e-15, 1.0 - 1e-15)
             tuning_rows.append(
                 {
                     "model": model_name,
                     **params,
+                    "training_accuracy": float(accuracy_score(y_train, train_pred)),
                     "validation_accuracy": float(accuracy_score(y_val, val_pred)),
                     "validation_log_loss": float(log_loss(y_val, val_proba, labels=[0, 1])),
                     "elapsed_fit_seconds": float(time.perf_counter() - fit_started),
