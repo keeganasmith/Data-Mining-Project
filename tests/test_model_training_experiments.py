@@ -194,6 +194,7 @@ class ModelTrainingExperimentsTests(unittest.TestCase):
                     "test_ece_10_bins",
                 }.issubset(set(summary_df.columns))
             )
+            self.assertEqual({"decision_tree", "random_forest", "gbdt"}, set(summary_df["model"]))
 
             self.assertIn("structured_only", manifests)
             artifacts = manifests["structured_only"].get("artifacts", {})
