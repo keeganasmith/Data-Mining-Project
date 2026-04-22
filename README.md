@@ -331,7 +331,7 @@ All artifacts are written under:
 {
   "model_training": {
     "enabled": true,
-    "depth_values": [8],
+    "depth_values": [3, 5, 7, 9],
     "rf_n_estimators": 300,
     "dt_min_samples_leaf": 25,
     "rf_min_samples_leaf": 15,

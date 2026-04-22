@@ -20,8 +20,7 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "target_column": "team1_wins",
     "id_columns": ["event_id", "match_id", "match_date", "match_seq", "team1_player_id", "team2_player_id"],
     "date_column": "match_date",
-    # Keep a single fixed depth by default (no depth sweep).
-    "depth_values": [8],
+    "depth_values": [3, 5, 7, 9],
     "test_size": 0.2,
     "validation_size": 0.2,
     "output_subdir": "model_training",
@@ -1021,15 +1020,15 @@ def run_feature_set_training_experiment(
         output_dir=output_dir,
         config=config,
     )
-    tuned_best_row: dict[str, Any] | None = None
+    tuned_best_rows_by_model: dict[str, dict[str, Any]] = {}
     if hyperparameter_manifest.get("status") == "completed":
         best_models = hyperparameter_manifest.get("best_models")
         if isinstance(best_models, list) and best_models:
-            tuned_best_row = min(
-                [row for row in best_models if isinstance(row, Mapping)],
-                key=lambda row: float(row.get("validation_log_loss", np.inf)),
-                default=None,
-            )
+            tuned_best_rows_by_model = {
+                str(row.get("model", "")).strip().lower(): dict(row)
+                for row in best_models
+                if isinstance(row, Mapping) and str(row.get("model", "")).strip()
+            }
 
     manifests: dict[str, Any] = {}
     run_summary_rows: list[dict[str, Any]] = []
@@ -1045,29 +1044,29 @@ def run_feature_set_training_experiment(
         start_perf = time.perf_counter()
         print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
         run_config = dict(config or {})
-        if tuned_best_row is not None:
-            best_model = str(tuned_best_row.get("model", "")).strip().lower()
-            if best_model in {"random_forest", "gbdt"}:
-                run_config["training_models"] = [best_model]
-                run_config["depth_values"] = [int(tuned_best_row.get("max_depth", run_config.get("depth_values", [8])[0]))]
-                n_estimators_key = "rf_n_estimators" if best_model == "random_forest" else "gbdt_n_estimators"
-                run_config[n_estimators_key] = int(
-                    tuned_best_row.get("n_estimators", run_config.get(n_estimators_key, 300))
-                )
-                if best_model == "random_forest":
-                    run_config["rf_min_samples_leaf"] = int(
-                        tuned_best_row.get("min_samples_leaf", run_config.get("rf_min_samples_leaf", 15))
-                    )
-                else:
-                    run_config["gbdt_min_samples_leaf"] = int(
-                        tuned_best_row.get("min_samples_leaf", run_config.get("gbdt_min_samples_leaf", 20))
-                    )
-                    run_config["gbdt_learning_rate"] = float(
-                        tuned_best_row.get("learning_rate", run_config.get("gbdt_learning_rate", 0.05))
-                    )
-                    run_config["gbdt_subsample"] = float(
-                        tuned_best_row.get("subsample", run_config.get("gbdt_subsample", 0.8))
-                    )
+        depth_candidates = list(run_config.get("depth_values", []))
+        if "random_forest" in tuned_best_rows_by_model:
+            rf_best = tuned_best_rows_by_model["random_forest"]
+            depth_candidates.append(int(rf_best.get("max_depth", 0)))
+            run_config["rf_n_estimators"] = int(rf_best.get("n_estimators", run_config.get("rf_n_estimators", 300)))
+            run_config["rf_min_samples_leaf"] = int(
+                rf_best.get("min_samples_leaf", run_config.get("rf_min_samples_leaf", 15))
+            )
+        if "gbdt" in tuned_best_rows_by_model:
+            gbdt_best = tuned_best_rows_by_model["gbdt"]
+            depth_candidates.append(int(gbdt_best.get("max_depth", 0)))
+            run_config["gbdt_n_estimators"] = int(
+                gbdt_best.get("n_estimators", run_config.get("gbdt_n_estimators", 300))
+            )
+            run_config["gbdt_min_samples_leaf"] = int(
+                gbdt_best.get("min_samples_leaf", run_config.get("gbdt_min_samples_leaf", 20))
+            )
+            run_config["gbdt_learning_rate"] = float(
+                gbdt_best.get("learning_rate", run_config.get("gbdt_learning_rate", 0.05))
+            )
+            run_config["gbdt_subsample"] = float(gbdt_best.get("subsample", run_config.get("gbdt_subsample", 0.8)))
+        if depth_candidates:
+            run_config["depth_values"] = sorted({int(depth) for depth in depth_candidates if int(depth) > 0})
         run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
         run_manifest = run_model_training_experiments(
             feature_set_df,
