@@ -4,4 +4,5 @@ python -m tennis_pipeline.cli.run_pipeline \
   --input-path data/raw_data.joblib \
   --use-elo \
   --clustering-method kmeans \
-  --run-feature-set-experiment
+  --run-feature-set-experiment \
+  --config-path parallel_config.json

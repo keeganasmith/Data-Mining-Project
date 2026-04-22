@@ -3,7 +3,7 @@
   "feature_set_name": "data_plus_temporal_elo_clustering",
   "rows_evaluated": 57,
   "time_budget_seconds": 900.0,
-  "elapsed_seconds": 925.1434073781129,
+  "elapsed_seconds": 922.4330902548973,
   "best_models": [
     {
       "model": "gbdt",
@@ -13,8 +13,8 @@
       "training_accuracy": 0.683668669030904,
       "validation_accuracy": 0.6527521441754424,
       "validation_log_loss": 0.6161143279280178,
-      "elapsed_fit_seconds": 20.664416778134182,
-      "elapsed_total_seconds": 206.00438715098426,
+      "elapsed_fit_seconds": 20.614095602184534,
+      "elapsed_total_seconds": 205.42280848580413,
       "learning_rate": 0.1,
       "subsample": 0.7
     },
@@ -26,8 +26,8 @@
       "training_accuracy": 0.6946153289426069,
       "validation_accuracy": 0.6539463684724786,
       "validation_log_loss": 0.6164556097458211,
-      "elapsed_fit_seconds": 1.3338316611479968,
-      "elapsed_total_seconds": 30.24936592602171,
+      "elapsed_fit_seconds": 1.3121489621698856,
+      "elapsed_total_seconds": 29.86985776782967,
       "learning_rate": NaN,
       "subsample": NaN
     }
