@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Mapping
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timezone, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,9 @@ DEFAULT_MODEL_TRAINING_CONFIG: dict[str, Any] = {
     "hyperparameter_tuning_n_estimators": [100, 200, 300],
     "hyperparameter_tuning_learning_rate": [0.03, 0.05, 0.1],
     "hyperparameter_tuning_subsample": [0.7, 0.85, 1.0],
+    "parallel_feature_set_runs": True,
+    "max_parallel_feature_set_runs": 0,
+    "random_forest_n_jobs": -1,
 }
 
 MODEL_TRAINING_PROFILES: dict[str, dict[str, Any]] = {
@@ -140,6 +145,14 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "gbdt_min_samples_leaf",
     ):
         cfg[key] = int(cfg[key])
+    cfg["max_parallel_feature_set_runs"] = int(cfg["max_parallel_feature_set_runs"])
+    cfg["random_forest_n_jobs"] = int(cfg["random_forest_n_jobs"])
+    if cfg["max_parallel_feature_set_runs"] < 0:
+        raise ValueError("model_training config['max_parallel_feature_set_runs'] must be >= 0")
+    if cfg["random_forest_n_jobs"] == 0:
+        raise ValueError("model_training config['random_forest_n_jobs'] cannot be 0")
+    if not isinstance(cfg.get("parallel_feature_set_runs"), bool):
+        raise TypeError("model_training config['parallel_feature_set_runs'] must be a bool")
 
     cfg["gbdt_learning_rate"] = float(cfg["gbdt_learning_rate"])
     cfg["gbdt_subsample"] = float(cfg["gbdt_subsample"])
@@ -256,7 +269,11 @@ def run_full_feature_hyperparameter_tuning_experiment(
             if elapsed >= budget_seconds:
                 break
             if model_name == "random_forest":
-                model = RandomForestClassifier(random_state=int(cfg["random_state"]), n_jobs=-1, **params)
+                model = RandomForestClassifier(
+                    random_state=int(cfg["random_state"]),
+                    n_jobs=int(cfg["random_forest_n_jobs"]),
+                    **params,
+                )
             else:
                 model = GradientBoostingClassifier(random_state=int(cfg["random_state"]), **params)
             pipeline = Pipeline(steps=[("prep", preprocessor), ("model", model)])
@@ -707,7 +724,7 @@ def run_model_training_experiments(
             "n_estimators": cfg["rf_n_estimators"],
             "min_samples_leaf": cfg["rf_min_samples_leaf"],
             "random_state": cfg["random_state"],
-            "n_jobs": -1,
+            "n_jobs": cfg["random_forest_n_jobs"],
         },
         "gbdt": {
             "n_estimators": cfg["gbdt_n_estimators"],
@@ -729,7 +746,7 @@ def run_model_training_experiments(
             max_depth=depth,
             min_samples_leaf=cfg["rf_min_samples_leaf"],
             random_state=cfg["random_state"],
-            n_jobs=-1,
+            n_jobs=cfg["random_forest_n_jobs"],
         ),
         "gbdt": lambda depth: GradientBoostingClassifier(
             n_estimators=cfg["gbdt_n_estimators"],
@@ -997,6 +1014,24 @@ def run_model_training_experiments(
     return manifest
 
 
+def _run_feature_set_training_job(
+    *,
+    feature_set_name: str,
+    feature_set_df: pd.DataFrame,
+    output_dir: str,
+    run_config: Mapping[str, Any],
+) -> tuple[dict[str, Any], float, str]:
+    start_perf = time.perf_counter()
+    run_manifest = run_model_training_experiments(
+        feature_set_df,
+        output_dir=output_dir,
+        config=run_config,
+    )
+    ended_at = datetime.now(timezone.utc)
+    elapsed_seconds = time.perf_counter() - start_perf
+    return run_manifest, float(elapsed_seconds), ended_at.isoformat()
+
+
 def run_feature_set_training_experiment(
     feature_set_tables: Mapping[str, pd.DataFrame],
     *,
@@ -1030,19 +1065,20 @@ def run_feature_set_training_experiment(
                 if isinstance(row, Mapping) and str(row.get("model", "")).strip()
             }
 
+    cfg = _normalize_config(config)
     manifests: dict[str, Any] = {}
     run_summary_rows: list[dict[str, Any]] = []
-    feature_set_count = len(feature_set_tables)
+    feature_set_entries = list(feature_set_tables.items())
+    feature_set_count = len(feature_set_entries)
     inferred_total_runs = total_runs if total_runs is not None else feature_set_count
-    for offset, (feature_set_name, feature_set_df) in enumerate(feature_set_tables.items()):
-        run_number = start_run_index + offset
-        print(
-            f"[pipeline] running feature-set model-training experiment: {feature_set_name} "
-            f"(run {run_number} / {inferred_total_runs})"
-        )
-        started_at = datetime.now(timezone.utc)
-        start_perf = time.perf_counter()
-        print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
+    cpu_count = os.cpu_count() or 1
+    if cfg["max_parallel_feature_set_runs"] > 0:
+        max_workers = min(feature_set_count, cfg["max_parallel_feature_set_runs"])
+    else:
+        max_workers = min(feature_set_count, max(1, cpu_count))
+    enable_parallel = bool(cfg["parallel_feature_set_runs"]) and max_workers > 1
+
+    def _build_run_config(feature_set_name: str) -> dict[str, Any]:
         run_config = dict(config or {})
         depth_candidates = list(run_config.get("depth_values", []))
         if "random_forest" in tuned_best_rows_by_model:
@@ -1068,11 +1104,59 @@ def run_feature_set_training_experiment(
         if depth_candidates:
             run_config["depth_values"] = sorted({int(depth) for depth in depth_candidates if int(depth) > 0})
         run_config["output_subdir"] = str(Path("model_training_feature_sets") / feature_set_name)
-        run_manifest = run_model_training_experiments(
-            feature_set_df,
-            output_dir=output_dir,
-            config=run_config,
+        run_config.setdefault("random_forest_n_jobs", 1 if enable_parallel else -1)
+        return run_config
+
+    scheduled_runs: list[tuple[int, str, pd.DataFrame, dict[str, Any]]] = []
+    for offset, (feature_set_name, feature_set_df) in enumerate(feature_set_entries):
+        run_number = start_run_index + offset
+        run_config = _build_run_config(feature_set_name)
+        print(
+            f"[pipeline] running feature-set model-training experiment: {feature_set_name} "
+            f"(run {run_number} / {inferred_total_runs})"
         )
+        scheduled_runs.append((run_number, feature_set_name, feature_set_df, run_config))
+
+    if enable_parallel:
+        print(f"[pipeline] parallel feature-set training enabled with max_workers={max_workers}")
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(
+                    _run_feature_set_training_job,
+                    feature_set_name=feature_set_name,
+                    feature_set_df=feature_set_df,
+                    output_dir=str(output_dir),
+                    run_config=run_config,
+                ): (run_number, feature_set_name)
+                for run_number, feature_set_name, feature_set_df, run_config in scheduled_runs
+            }
+            for future in as_completed(future_map):
+                run_number, feature_set_name = future_map[future]
+                run_manifest, elapsed_seconds, ended_at_iso = future.result()
+                print(
+                    f"[pipeline] feature-set training end ({feature_set_name}): "
+                    f"{ended_at_iso} (run {run_number} / {inferred_total_runs}, elapsed {elapsed_seconds:.2f}s)"
+                )
+                manifests[feature_set_name] = run_manifest
+    else:
+        for run_number, feature_set_name, feature_set_df, run_config in scheduled_runs:
+            started_at = datetime.now(timezone.utc)
+            start_perf = time.perf_counter()
+            print(f"[pipeline] feature-set training start ({feature_set_name}): {started_at.isoformat()}")
+            run_manifest = run_model_training_experiments(
+                feature_set_df,
+                output_dir=output_dir,
+                config=run_config,
+            )
+            ended_at = datetime.now(timezone.utc)
+            elapsed_seconds = time.perf_counter() - start_perf
+            print(
+                f"[pipeline] feature-set training end ({feature_set_name}): "
+                f"{ended_at.isoformat()} (elapsed {elapsed_seconds:.2f}s)"
+            )
+            manifests[feature_set_name] = run_manifest
+
+    for feature_set_name, run_manifest in manifests.items():
         manifests[feature_set_name] = run_manifest
         for model_metrics in run_manifest.get("models", []):
             model_name = model_metrics.get("model")
@@ -1089,13 +1173,6 @@ def run_feature_set_training_experiment(
                         "test_accuracy": float(model_metrics.get("test_accuracy", np.nan)),
                     }
                 )
-        ended_at = datetime.now(timezone.utc)
-        elapsed_seconds = time.perf_counter() - start_perf
-        print(
-            f"[pipeline] feature-set training end ({feature_set_name}): "
-            f"{ended_at.isoformat()} (elapsed {elapsed_seconds:.2f}s)"
-        )
-
     summary_dir = Path(output_dir) / "model_training_feature_sets"
     summary_dir.mkdir(parents=True, exist_ok=True)
 
