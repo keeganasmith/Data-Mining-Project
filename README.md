@@ -33,11 +33,12 @@ This repository is designed to run in Google Colab or locally with the same comm
    ```
 2. Run the pipeline (exact stage order is handled internally by the CLI):
    ```bash
-   python -m tennis_pipeline.cli.run_pipeline \
-     --input-path data/csv_data/atp_2001.csv \
+   PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
      --output-dir data \
      --use-elo \
-     --use-temporal-features
+     --use-temporal-features \
+     --clustering-method both \
+     --training-profile fast
    ```
 3. Open the final narrative notebook:
    - [`main_notebook.ipynb`](main_notebook.ipynb) (primary deliverable)
@@ -91,7 +92,8 @@ The runner executes the following steps in a fixed order:
 5. `05_build_features_static`
 6. `06_build_features_temporal_elo` (optional via `--use-elo`)
 7. `06b_build_features_temporal_rolling` (optional via `--use-temporal-features`)
-8. `07_finalize_model_table`
+8. `06c_build_features_clustering` (optional via `--clustering-method`)
+9. `07_finalize_model_table`
 
 For each executed step, the pipeline:
 
@@ -115,21 +117,21 @@ Run the pipeline with:
 
 ```bash
 python -m tennis_pipeline.cli.run_pipeline \
-  --input-path <path-to-input-file> \
   --output-dir <output-root> \
   [--config-path <json-or-yaml-config>] \
   [--use-elo] \
   [--use-temporal-features] \
-  [--run-feature-set-experiment]
+  [--clustering-method {none,kmeans,dbscan,both}] \
+  [--run-feature-set-experiment] \
+  [--training-profile <profile-name>]
 ```
 
-### Required argument
-
-- `--input-path`
-  - Path to the raw input file.
-  - Supported formats: `.csv`, `.txt`, `.parquet`, `.pq`, `.joblib`.
-
 ### Optional arguments
+
+- `--input-path` (default: none)
+  - Optional path to the raw input file.
+  - If omitted, step `01_load_raw` uses `data/raw_data.joblib` when present, otherwise falls back to building from `data/csv_data/*.csv`.
+  - Supported formats: `.csv`, `.txt`, `.parquet`, `.pq`, `.joblib`.
 
 - `--output-dir` (default: `data`)
   - Base output directory.
@@ -158,7 +160,15 @@ python -m tennis_pipeline.cli.run_pipeline \
   - Runs fixed-hyperparameter training across two feature-set variants:
     - data_only
     - data_plus_temporal_elo_clustering
-  - This flag does not require anomaly features.
+  - Implies `--use-elo`.
+
+- `--clustering-method` (default: `none`)
+  - Controls stage `06c_build_features_clustering`.
+  - Choices: `none`, `kmeans`, `dbscan`, `both`.
+
+- `--training-profile` (default: none)
+  - Optional model-training profile override from `MODEL_TRAINING_PROFILES`.
+  - Use `fast` to run a quicker diagnostic configuration.
 
 ---
 
@@ -489,6 +499,17 @@ PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
   --input-path data/csv_data/atp_2024.csv \
   --output-dir data \
   --use-elo
+```
+
+## Clustering + fast-profile run
+
+```bash
+PYTHONPATH=src python -m tennis_pipeline.cli.run_pipeline \
+  --output-dir data \
+  --use-elo \
+  --use-temporal-features \
+  --clustering-method both \
+  --training-profile fast
 ```
 
 
