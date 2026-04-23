@@ -81,6 +81,14 @@ Static features provide a strong baseline, while leakage-safe temporal features 
 - [Checkpoint 1](checkpoints/checkpoint_1.ipynb)
 - [Checkpoint 2](checkpoints/checkpoint_2.ipynb)
 
+## Requirements
+
+All dependencies can be found in requirements.txt and can be pip installed:  
+```
+pip install -r requirements.txt
+```
+The version of Python used is 3.11.12. Verified on MacOS and Ubuntu operating systems. 
+
 ## 1) How the pipeline works
 
 The runner executes the following steps in a fixed order:
