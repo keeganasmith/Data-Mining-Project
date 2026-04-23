@@ -1,9 +1,79 @@
-# Tennis Pipeline: End-to-End Usage Guide
+# ATP Singles Match Outcome Modeling
 
-This repository includes a modular, step-based data pipeline for creating a leakage-safe tennis modeling table and experiment artifacts.
+Short overview: this project builds a leakage-safe, end-to-end machine learning pipeline for ATP singles match prediction, from raw CSV ingestion through feature engineering, temporal modeling, and evaluation artifacts.
 
-The pipeline entrypoint is `src/tennis_pipeline/cli/run_pipeline.py`, which executes steps `01` through `07` in order (including optional temporal feature stages) and writes intermediate and final artifacts to disk.
+> **Main deliverable:** [`main_notebook.ipynb`](main_notebook.ipynb)
 
+> **Project video:** [Project walkthrough (add link)](https://example.com)
+
+## Research questions
+
+1. How much predictive signal is available from pre-match player/context features in ATP singles data?
+2. Do leakage-safe temporal features (Elo and rolling form) improve predictive performance over static-only features?
+3. Which model family (logistic regression, tree-based baselines, gradient boosting) provides the strongest calibrated match-win probabilities?
+
+## Data
+
+This repo primarily uses ATP singles match records stored in `data/csv_data/` (for example yearly files like `atp_2001.csv` through recent seasons) sourced from the ATP tennis data repository.
+
+High-level preprocessing flow:
+1. Load raw CSV/table data.
+2. Normalize schema + clean values (IDs, dates, rank sanity, duplicate handling).
+3. Build deterministic Team1/Team2 roles and binary target.
+4. Engineer static features, then optional leakage-safe temporal Elo + rolling-form features.
+5. Finalize `model_table.parquet` and downstream experiment artifacts in `data/processed/`.
+
+## How to reproduce (Colab + local)
+
+This repository is designed to run in Google Colab or locally with the same command sequence.
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Run the pipeline (exact stage order is handled internally by the CLI):
+   ```bash
+   python -m tennis_pipeline.cli.run_pipeline \
+     --input-path data/csv_data/atp_2001.csv \
+     --output-dir data \
+     --use-elo \
+     --use-temporal-features
+   ```
+3. Open the final narrative notebook:
+   - [`main_notebook.ipynb`](main_notebook.ipynb) (primary deliverable)
+   - Optional milestone notebooks: [`checkpoints/checkpoint_1.ipynb`](checkpoints/checkpoint_1.ipynb), [`checkpoints/checkpoint_2.ipynb`](checkpoints/checkpoint_2.ipynb)
+
+For Colab, upload the repo (or mount Drive), run the install command above in a notebook cell, then execute the same CLI command from a `!python -m ...` cell before opening/running `main_notebook.ipynb`.
+
+## Key dependencies
+
+Core libraries: `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `seaborn`, and `joblib`.
+
+See the complete pinned set in [`requirements.txt`](requirements.txt).
+
+## Concise repo tree
+
+```text
+.
+├── main_notebook.ipynb
+├── checkpoints/
+│   ├── checkpoint_1.ipynb
+│   └── checkpoint_2.ipynb
+├── src/
+│   └── tennis_pipeline/
+│       ├── cli/
+│       ├── steps/
+│       └── experiments/
+├── data/
+│   ├── csv_data/
+│   └── processed/
+├── requirements.txt
+└── README.md
+```
+
+## Results summary
+
+Static features provide a strong baseline, while leakage-safe temporal features (especially Elo differentials and rolling form) generally improve discrimination and ranking quality. Gradient-boosted tree models are typically top performers on aggregate metrics, with calibration artifacts showing room for probability refinement in edge cases. The pipeline’s strict chronological feature construction supports realistic pre-match prediction settings and reproducible experiments.
 
 ## Checkpoint notebooks
 
