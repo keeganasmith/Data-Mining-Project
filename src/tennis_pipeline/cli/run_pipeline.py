@@ -102,7 +102,7 @@ def _ensure_elo_feature_when_disabled(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_pipeline(
-    input_path: str | Path,
+    input_path: str | Path | None = None,
     output_dir: str | Path = "data",
     *,
     use_elo: bool = False,
@@ -125,7 +125,8 @@ def run_pipeline(
     interim_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    current: pd.DataFrame | str | Path = Path(input_path)
+    current: pd.DataFrame | str | Path | None
+    current = Path(input_path) if input_path is not None else None
 
     effective_use_elo = use_elo or run_feature_set_experiment
     effective_use_temporal_features = use_temporal_features
@@ -258,7 +259,15 @@ def build_parser() -> argparse.ArgumentParser:
     """Build command-line argument parser for pipeline execution."""
 
     parser = argparse.ArgumentParser(description="Run the tennis feature pipeline end-to-end")
-    parser.add_argument("--input-path", required=True, help="Path to raw input file (.csv/.txt/.parquet)")
+    parser.add_argument(
+        "--input-path",
+        default=None,
+        help=(
+            "Optional path to raw input file (.csv/.txt/.parquet/.joblib). "
+            "If omitted, step 01 loads data/raw_data.joblib when present, "
+            "otherwise builds it from data/csv_data/*.csv."
+        ),
+    )
     parser.add_argument(
         "--output-dir",
         default="data",
