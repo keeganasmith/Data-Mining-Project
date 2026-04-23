@@ -4,6 +4,12 @@ This repository includes a modular, step-based data pipeline for creating a leak
 
 The pipeline entrypoint is `src/tennis_pipeline/cli/run_pipeline.py`, which executes steps `01` through `07` in order (including optional temporal feature stages) and writes intermediate and final artifacts to disk.
 
+
+## Checkpoint notebooks
+
+- [Checkpoint 1](checkpoints/checkpoint_1.ipynb)
+- [Checkpoint 2](checkpoints/checkpoint_2.ipynb)
+
 ## 1) How the pipeline works
 
 The runner executes the following steps in a fixed order:
