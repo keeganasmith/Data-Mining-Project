@@ -81,7 +81,7 @@ Static features provide a strong baseline, while leakage-safe temporal features 
 - [Checkpoint 1](checkpoints/checkpoint_1.ipynb)
 - [Checkpoint 2](checkpoints/checkpoint_2.ipynb)
 
-## Requirements
+## Software Requirements
 
 All dependencies can be found in requirements.txt and can be pip installed:  
 ```
