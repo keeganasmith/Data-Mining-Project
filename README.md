@@ -4,7 +4,7 @@ Short overview: this project builds a leakage-safe, end-to-end machine learning 
 
 > **Main deliverable:** [`main_notebook.ipynb`](main_notebook.ipynb)
 
-> **Project video:** [Project walkthrough (add link)](https://example.com)
+> **Project video:** [Project walkthrough](https://youtu.be/g-YP-GoUB7o)
 
 ## Research questions
 
@@ -23,6 +23,7 @@ High-level preprocessing flow:
 4. Engineer static features, then optional leakage-safe temporal Elo + rolling-form features.
 5. Finalize `model_table.parquet` and downstream experiment artifacts in `data/processed/`.
 
+Data was obtained from a good samaritan [on github](https://github.com/keeganasmith/ATP_tennis_data). Originally obtained from ATP official website. 
 ## How to reproduce (Colab + local)
 
 This repository is designed to run in Google Colab or locally with the same command sequence.
@@ -50,7 +51,9 @@ For Colab, upload the repo (or mount Drive), run the install command above in a 
 
 Core libraries: `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `seaborn`, and `joblib`.
 
-See the complete pinned set in [`requirements.txt`](requirements.txt).
+See the complete pinned set in [`requirements.txt`](requirements.txt).  
+
+Version of Python used: 3.11.12
 
 ## Concise repo tree
 
