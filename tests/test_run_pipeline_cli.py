@@ -13,6 +13,44 @@ from tennis_pipeline.cli import run_pipeline as rp
 
 
 class RunPipelineCliTests(unittest.TestCase):
+    def test_pipeline_can_run_without_input_path(self) -> None:
+        seen_inputs: list[object] = []
+        real_import_module = importlib.import_module
+
+        def fake_import_module(name: str):
+            if not name.startswith("tennis_pipeline.steps."):
+                return real_import_module(name)
+
+            def _run(current, config=None):
+                seen_inputs.append(current)
+                return pd.DataFrame(
+                    {
+                        "event_id": ["e1", "e2"],
+                        "match_id": ["m1", "m2"],
+                        "match_date": ["2024-01-01", "2024-01-02"],
+                        "match_seq": [1, 2],
+                        "team1_player_id": ["p1", "p2"],
+                        "team2_player_id": ["q1", "q2"],
+                        "team1_wins": [1, 0],
+                    }
+                )
+
+            return SimpleNamespace(run=_run)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch.object(rp, "STEP_MODULES", ("01_load_raw", "07_finalize_model_table")),
+                patch.object(rp.importlib, "import_module", side_effect=fake_import_module),
+                patch.object(rp, "run_stage_checks"),
+                patch.object(rp, "run_model_training_experiments", return_value={}),
+                patch.object(pd.DataFrame, "to_parquet", return_value=None),
+            ):
+                rp.run_pipeline(
+                    output_dir=tmpdir,
+                )
+
+        self.assertIsNone(seen_inputs[0])
+
     def test_clustering_method_reaches_step_config(self) -> None:
         seen_step_configs: dict[str, dict[str, object]] = {}
         real_import_module = importlib.import_module
